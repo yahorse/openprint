@@ -1,0 +1,136 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-amd64
+            artifact: opp
+          - os: macos-13
+            target: macos-intel
+            artifact: opp
+          - os: macos-latest
+            target: macos-arm64
+            artifact: opp
+          - os: windows-latest
+            target: windows-amd64
+            artifact: opp.exe
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          pip install .
+          pip install pyinstaller
+
+      - name: Build standalone binary
+        run: |
+          pyinstaller --onefile --name opp --strip --noconfirm \
+            --add-data "src/openprint/static:openprint/static" \
+            --hidden-import openprint.cli.main \
+            --hidden-import openprint.server \
+            --hidden-import openprint.bridge \
+            --hidden-import openprint.testkit \
+            --hidden-import openprint.backends.cups \
+            --hidden-import openprint.backends.ipp \
+            --hidden-import openprint.backends.dummy \
+            --collect-submodules openprint \
+            src/openprint/cli/__main__.py
+
+      - name: Rename artifact
+        shell: bash
+        run: |
+          cd dist
+          if [ "${{ matrix.target }}" != "windows-amd64" ]; then
+            mv opp opp-${{ matrix.target }}
+          else
+            mv opp.exe opp-${{ matrix.target }}.exe
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opp-${{ matrix.target }}
+          path: dist/opp-*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find artifacts -type f | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/*
+          body: |
+            ## Install
+
+            ### Download a binary (no Python needed)
+
+            | Platform | Download |
+            |---|---|
+            | **Linux (x86_64)** | `opp-linux-amd64` |
+            | **macOS (Apple Silicon)** | `opp-macos-arm64` |
+            | **macOS (Intel)** | `opp-macos-intel` |
+            | **Windows** | `opp-windows-amd64.exe` |
+
+            ```bash
+            # Linux / macOS — download and run
+            chmod +x opp-*
+            ./opp-linux-amd64 discover
+
+            # Windows
+            opp-windows-amd64.exe discover
+            ```
+
+            ### Or install with pip
+
+            ```bash
+            pip install openprint
+            ```
+
+  publish-pypi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build package
+        run: |
+          pip install build
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true

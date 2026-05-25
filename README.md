@@ -8,6 +8,24 @@ Enough.
 
 OpenPrint is an open source printing protocol. Send a PDF over HTTP, get a print. No drivers. No apps. No ink DRM. Seven API endpoints replace the entire printing stack.
 
+## Install
+
+**No Python needed** — download a single binary:
+
+```bash
+# macOS
+brew install yahorse/tap/openprint
+
+# Linux
+curl -Lo opp https://github.com/yahorse/openprint/releases/latest/download/opp-linux-amd64
+chmod +x opp && sudo mv opp /usr/local/bin/
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/yahorse/openprint/main/scripts/install.ps1 | iex
+```
+
+Or with pip (requires Python 3.10+):
+
 ```bash
 pip install openprint
 ```
