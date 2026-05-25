@@ -23,7 +23,14 @@ def _make_mock_backend(name: str) -> CUPSBackend:
 
 @pytest.fixture
 def bridge():
-    b = Bridge(enable_discovery=False, log_requests=False)
+    b = Bridge(
+        enable_discovery=False,
+        log_requests=False,
+        enable_persistence=False,
+        enable_network_scan=False,
+        enable_cups_watch=False,
+        enable_dashboard=False,
+    )
     b.printers = {
         "HP_LaserJet": BridgedPrinter("HP_LaserJet", _make_mock_backend("HP_LaserJet")),
         "Canon_Inkjet": BridgedPrinter("Canon_Inkjet", _make_mock_backend("Canon_Inkjet")),

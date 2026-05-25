@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenPrint Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e4e4e7;
+    --muted: #71717a;
+    --accent: #3b82f6;
+    --green: #22c55e;
+    --yellow: #eab308;
+    --red: #ef4444;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 24px; font-weight: 600; margin-bottom: 8px; }
+  .subtitle { color: var(--muted); margin-bottom: 32px; font-size: 14px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .card h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .status-dot.idle { background: var(--green); }
+  .status-dot.printing { background: var(--accent); animation: pulse 1.5s infinite; }
+  .status-dot.error { background: var(--red); }
+  .status-dot.offline { background: var(--muted); }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .supply-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--border);
+    margin: 4px 0 8px 0;
+    overflow: hidden;
+  }
+  .supply-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
+  .supply-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .caps { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .cap-tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--border);
+    color: var(--muted);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  th {
+    text-align: left;
+    color: var(--muted);
+    font-weight: 500;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .badge.queued { background: #1e3a5f; color: #60a5fa; }
+  .badge.processing, .badge.printing { background: #1a365d; color: #3b82f6; }
+  .badge.completed { background: #14532d; color: #4ade80; }
+  .badge.canceled { background: #3f3f46; color: #a1a1aa; }
+  .badge.error { background: #450a0a; color: #f87171; }
+  .upload-area {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    margin-bottom: 32px;
+  }
+  .upload-area:hover, .upload-area.dragover { border-color: var(--accent); }
+  .upload-area p { color: var(--muted); margin-top: 8px; font-size: 14px; }
+  select, button {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    font-weight: 500;
+  }
+  .print-options { display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+  .empty { color: var(--muted); text-align: center; padding: 40px; }
+  #toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--green);
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 14px;
+    display: none;
+    z-index: 100;
+  }
+  section { margin-bottom: 32px; }
+  section h2 { font-size: 18px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+
+<h1>OpenPrint</h1>
+<p class="subtitle">Driverless printing dashboard</p>
+
+<div id="upload" class="upload-area" onclick="fileInput.click()">
+  <strong>Drop a PDF here or click to upload</strong>
+  <p>Print to any discovered printer</p>
+  <input type="file" id="fileInput" accept=".pdf" hidden>
+  <div class="print-options" id="printOptions" style="display:none;justify-content:center;">
+    <select id="printerSelect"></select>
+    <select id="copies">
+      <option value="1">1 copy</option>
+      <option value="2">2 copies</option>
+      <option value="3">3 copies</option>
+      <option value="5">5 copies</option>
+    </select>
+    <select id="duplex">
+      <option value="none">Single-sided</option>
+      <option value="long-edge">Duplex (long)</option>
+      <option value="short-edge">Duplex (short)</option>
+    </select>
+    <button class="primary" onclick="submitPrint(event)">Print</button>
+  </div>
+</div>
+
+<section>
+  <h2>Printers</h2>
+  <div class="grid" id="printers"><div class="empty">Scanning...</div></div>
+</section>
+
+<section>
+  <h2>Recent Jobs</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>Job</th><th>Printer</th><th>Status</th><th>Pages</th><th>Time</th></tr></thead>
+      <tbody id="jobs"><tr><td colspan="5" class="empty">No jobs yet</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<div id="toast"></div>
+
+<script>
+const API = '/opp/v1';
+let selectedFile = null;
+
+async function fetchJSON(path) {
+  const r = await fetch(API + path);
+  return r.json();
+}
+
+async function loadPrinters() {
+  try {
+    const printers = await fetchJSON('/printers');
+    const grid = document.getElementById('printers');
+    const select = document.getElementById('printerSelect');
+
+    if (!printers.length) {
+      grid.innerHTML = '<div class="empty">No printers found</div>';
+      return;
+    }
+
+    grid.innerHTML = printers.map(p => `
+      <div class="card">
+        <h2><span class="status-dot ${p.status}"></span> ${esc(p.name)}</h2>
+        <div class="caps">
+          ${p.capabilities.color ? '<span class="cap-tag">Color</span>' : '<span class="cap-tag">Mono</span>'}
+          ${p.capabilities.duplex ? '<span class="cap-tag">Duplex</span>' : ''}
+          ${(p.capabilities.media_sizes || []).map(m => `<span class="cap-tag">${esc(m.toUpperCase())}</span>`).join('')}
+        </div>
+      </div>
+    `).join('');
+
+    select.innerHTML = printers.map(p =>
+      `<option value="${esc(p.id)}">${esc(p.name)}</option>`
+    ).join('');
+  } catch (e) {
+    document.getElementById('printers').innerHTML =
+      '<div class="empty">Cannot reach server</div>';
+  }
+}
+
+async function loadJobs() {
+  try {
+    const data = await fetchJSON('/jobs?limit=20');
+    const tbody = document.getElementById('jobs');
+
+    if (!data.jobs.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">No jobs yet</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.jobs.map(j => `
+      <tr>
+        <td style="font-family:monospace;font-size:12px">${esc(j.id)}</td>
+        <td>${esc(j.media || '-')}</td>
+        <td><span class="badge ${j.status}">${esc(j.status)}</span></td>
+        <td>${j.pages_printed}/${j.pages_total}</td>
+        <td style="color:var(--muted);font-size:12px">${new Date(j.created_at).toLocaleTimeString()}</td>
+      </tr>
+    `).join('');
+  } catch (e) {}
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+const upload = document.getElementById('upload');
+const fileInput = document.getElementById('fileInput');
+
+upload.addEventListener('dragover', e => { e.preventDefault(); upload.classList.add('dragover'); });
+upload.addEventListener('dragleave', () => upload.classList.remove('dragover'));
+upload.addEventListener('drop', e => {
+  e.preventDefault();
+  upload.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) pickFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) pickFile(fileInput.files[0]); });
+
+function pickFile(file) {
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    toast('Please select a PDF file', true);
+    return;
+  }
+  selectedFile = file;
+  upload.querySelector('strong').textContent = file.name;
+  document.getElementById('printOptions').style.display = 'flex';
+}
+
+async function submitPrint(e) {
+  e.stopPropagation();
+  if (!selectedFile) return;
+
+  const form = new FormData();
+  form.append('file', selectedFile);
+  form.append('printer', document.getElementById('printerSelect').value);
+  form.append('copies', document.getElementById('copies').value);
+  form.append('duplex', document.getElementById('duplex').value);
+
+  try {
+    const r = await fetch(API + '/jobs', { method: 'POST', body: form });
+    const data = await r.json();
+    if (r.ok) {
+      toast('Print job submitted: ' + data.id);
+      selectedFile = null;
+      upload.querySelector('strong').textContent = 'Drop a PDF here or click to upload';
+      document.getElementById('printOptions').style.display = 'none';
+      fileInput.value = '';
+      loadJobs();
+    } else {
+      toast(data.error?.message || 'Print failed', true);
+    }
+  } catch (e) {
+    toast('Network error', true);
+  }
+}
+
+function toast(msg, isError) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.background = isError ? 'var(--red)' : 'var(--green)';
+  t.style.display = 'block';
+  setTimeout(() => t.style.display = 'none', 3000);
+}
+
+loadPrinters();
+loadJobs();
+setInterval(loadPrinters, 15000);
+setInterval(loadJobs, 5000);
+</script>
+</body>
+</html>
