@@ -46,6 +46,7 @@ Repository = "https://github.com/yahorse/openprint"
 
 [project.scripts]
 openprint-server = "openprint.server:main"
+openprint-bridge = "openprint.bridge:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/openprint"]

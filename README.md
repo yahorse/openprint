@@ -82,6 +82,63 @@ OPP is versioned at `/opp/v1/`. All payloads are JSON (except file uploads which
 
 See the full [protocol specification](spec/openprint-protocol-v1.md) for details.
 
+## CUPS Bridge — Use Your Existing Printers
+
+Don't wait for printer manufacturers. The bridge wraps every CUPS printer on your system with the OPP API:
+
+```bash
+# Start the bridge
+openprint-bridge
+
+# Or with Python
+python -c "from openprint import Bridge; Bridge(port=631).run()"
+```
+
+That's it. Every printer configured in CUPS is now discoverable and printable via OPP. Any device on your network can print with a single HTTP call — no drivers needed on the client.
+
+```bash
+# List all bridged printers
+curl http://bridge.local:631/opp/v1/printers
+
+# Print to a specific printer
+curl -X POST http://bridge.local:631/opp/v1/jobs \
+  -F "file=@document.pdf" \
+  -F "printer=HP_LaserJet"
+
+# Check all printer statuses
+curl http://bridge.local:631/opp/v1/status
+```
+
+### How It Works
+
+```
+Phone/Laptop/Server          Raspberry Pi / Any Linux Box         Your Printers
+┌──────────┐                ┌──────────────────────────┐        ┌─────────────┐
+│ OPP      │   HTTP/REST    │  OpenPrint Bridge        │  CUPS  │ HP LaserJet │
+│ Client   │ ─────────────→ │  (openprint-bridge)      │ ─────→ │ Canon Inkjet│
+│ or curl  │   PDF + JSON   │  Auto-discovers all CUPS │  IPP   │ Brother MFC │
+└──────────┘                │  printers, serves via OPP│        └─────────────┘
+      ↑                     └──────────────────────────┘
+      │  mDNS discovery — each printer advertised individually
+      └────────────────────────────────────────────────┘
+```
+
+### Raspberry Pi Setup
+
+```bash
+# Install CUPS and OpenPrint
+sudo apt install cups
+pip install openprint
+
+# Add your printers via CUPS web UI
+# http://localhost:631/admin
+
+# Start the bridge (runs on boot with systemd)
+openprint-bridge
+```
+
+Now every device in your house prints through one endpoint. No drivers. No apps. Just HTTP.
+
 ## Architecture
 
 ```
@@ -112,7 +169,11 @@ openprint/
 │   └── errors.py            # Error types
 ├── tests/                   # Test suite
 ├── examples/                # Usage examples
-└── docker/                  # Container support
+├── docker/                  # Container support
+├── backend.py               # Abstract print backend interface
+└── backends/                # Backend implementations
+    ├── cups.py              # CUPS/IPP bridge (real printers)
+    └── dummy.py             # Simulated printer for testing
 ```
 
 ## Configuration
