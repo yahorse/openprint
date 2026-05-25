@@ -1,0 +1,26 @@
+[Unit]
+Description=OpenPrint Bridge — CUPS to OPP gateway
+Documentation=https://github.com/yahorse/openprint
+After=network-online.target cups.service
+Wants=network-online.target
+Requires=cups.service
+
+[Service]
+Type=simple
+User=openprint
+Group=openprint
+ExecStart=/usr/local/bin/openprint-bridge
+Restart=always
+RestartSec=5
+Environment=OPP_PORT=631
+Environment=OPP_HOST=0.0.0.0
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/openprint/.openprint
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -130,14 +130,39 @@ Phone/Laptop/Server          Raspberry Pi / Any Linux Box         Your Printers
 sudo apt install cups
 pip install openprint
 
-# Add your printers via CUPS web UI
-# http://localhost:631/admin
-
-# Start the bridge (runs on boot with systemd)
-openprint-bridge
+# One-line install (creates systemd service, starts on boot)
+sudo bash scripts/install.sh
 ```
 
 Now every device in your house prints through one endpoint. No drivers. No apps. Just HTTP.
+
+### Live Printer Detection
+
+The bridge doesn't just scan once — it watches continuously:
+
+- **CUPS watcher** polls every 10 seconds for printers added/removed from CUPS
+- **Network scanner** uses mDNS to detect IPP/IPP-S printers appearing on WiFi in real-time
+- **Direct IPP backend** talks to IPP printers without CUPS — no CUPS config needed for network printers
+
+Plug a printer into your WiFi and it appears in seconds. Unplug it and it disappears.
+
+### TLS
+
+```bash
+# Auto-generate a self-signed cert
+openprint-bridge --tls-auto
+
+# Or bring your own
+openprint-bridge --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
+```
+
+### Web Dashboard
+
+Open `http://<bridge-ip>:631` in a browser. Drag a PDF, pick a printer, print. Live status updates for all printers and jobs.
+
+### Persistent Job History
+
+All jobs are stored in SQLite at `~/.openprint/jobs.db`. Survives restarts, queryable via the API.
 
 ## Architecture
 
