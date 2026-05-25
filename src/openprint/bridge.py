@@ -38,6 +38,7 @@ from openprint.models import (
 )
 from openprint.pdf import parse_page_range, validate_pdf
 from openprint.progress import JobProgressTracker
+from openprint.resilience import PrinterHealthMonitor, RetryPrinter, check_ipp_alive, wait_for_printer
 from openprint.scanner import CUPSWatcher, NetworkPrinterScanner
 from openprint.status import EventBus, event_stream
 from openprint.store import JobStore
@@ -80,11 +81,13 @@ class Bridge:
         self._progress: JobProgressTracker | None = None
         self._network_scanner: NetworkPrinterScanner | None = None
         self._cups_watcher: CUPSWatcher | None = None
+        self._health_monitor: PrinterHealthMonitor | None = None
 
         self.enable_persistence: bool = kwargs.get("enable_persistence", True)
         self.enable_network_scan: bool = kwargs.get("enable_network_scan", True)
         self.enable_cups_watch: bool = kwargs.get("enable_cups_watch", True)
         self.enable_dashboard: bool = kwargs.get("enable_dashboard", True)
+        self.enable_health_check: bool = kwargs.get("enable_health_check", True)
         self.tls_cert: str | None = kwargs.get("tls_cert")
         self.tls_key: str | None = kwargs.get("tls_key")
 
@@ -120,11 +123,24 @@ class Bridge:
             await self.event_bus.publish(
                 "printer:status", "state", {"printer": pid, "state": "idle"}
             )
+            if self._health_monitor:
+                self._health_monitor.register(
+                    pid,
+                    host=printer_info["host"],
+                    port=printer_info["port"],
+                    hostname=printer_info.get("hostname"),
+                )
 
     async def _on_ipp_lost(self, printer_id: str) -> None:
         if printer_id in self.printers and self.printers[printer_id].source == "ipp":
             del self.printers[printer_id]
             logger.info("Removed IPP printer: %s", printer_id)
+
+    async def _on_health_change(self, printer_id: str, state: str) -> None:
+        logger.info("Printer %s health changed: %s", printer_id, state)
+        await self.event_bus.publish(
+            "printer:status", "state", {"printer": printer_id, "state": state}
+        )
 
     async def _advertise_printer(self, name: str) -> None:
         bp = self.printers.get(name)
@@ -187,6 +203,13 @@ class Bridge:
                 )
                 await self._network_scanner.start()
 
+            # Start health monitor for all printers
+            if self.enable_health_check:
+                self._health_monitor = PrinterHealthMonitor(check_interval=30.0)
+                self._health_monitor.set_callback(self._on_health_change)
+                await self._health_monitor.start()
+                logger.info("Printer health monitor started (30s interval)")
+
             # Advertise all initial printers via mDNS
             if self.config.enable_discovery:
                 for name in list(self.printers):
@@ -195,6 +218,8 @@ class Bridge:
             yield
 
             # Cleanup
+            if self._health_monitor:
+                await self._health_monitor.stop()
             if self._cups_watcher:
                 await self._cups_watcher.stop()
             if self._network_scanner:
@@ -290,9 +315,15 @@ class Bridge:
             else:
                 raise PrinterUnavailable("No printers available.")
 
-            state = await bp.backend.get_state()
-            if state in (PrinterState.ERROR, PrinterState.OFFLINE):
-                raise PrinterUnavailable(f"Printer '{bp.printer_id}' is not available.")
+            try:
+                state = await bp.backend.get_state()
+            except Exception:
+                state = PrinterState.OFFLINE
+
+            if state == PrinterState.ERROR:
+                raise PrinterUnavailable(f"Printer '{bp.printer_id}' is in error state.")
+            # Don't reject offline printers immediately — the job processor
+            # will retry and attempt to wake the printer
 
             try:
                 duplex_mode = DuplexMode(duplex)
@@ -468,7 +499,19 @@ class Bridge:
                 {"printer": bp.printer_id, "state": "printing"},
             )
 
-            await bp.backend.print_job(job, pdf_data)
+            # For IPP printers, use retry logic to handle sleeping printers
+            if isinstance(bp.backend, IPPBackend):
+                retry = RetryPrinter(
+                    bp.backend,
+                    host=bp.backend._http_url.split("//")[1].split(":")[0],
+                    port=int(bp.backend._http_url.split(":")[-1].split("/")[0]),
+                    max_retries=3,
+                    retry_delay=5.0,
+                    wake_timeout=20.0,
+                )
+                await retry.print_with_retry(job, pdf_data)
+            else:
+                await bp.backend.print_job(job, pdf_data)
 
             # For CUPS backend, track progress via lpstat polling
             if isinstance(bp.backend, CUPSBackend) and self._progress:
