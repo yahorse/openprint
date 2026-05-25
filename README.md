@@ -1,231 +1,180 @@
-# OpenPrint Protocol (OPP)
+# OpenPrint
 
-An open source printing protocol that actually works every time.
+**Printing is broken. We're fixing it.**
 
-HTTP/REST-based, PDF-native, driverless printing with real-time status and automatic discovery.
+It's 2026 and printing a PDF still requires downloading a 200MB driver, installing a vendor app that harvests your data, and praying the printer doesn't say "offline" for no reason. HP charges $1/page through subscriptions. Canon bricks printers with firmware updates. Epson won't let you scan when the yellow ink is low.
 
-## Why?
+Enough.
 
-Printing in 2026 is still broken. Drivers crash, proprietary protocols lock you in, and network printers vanish for no reason. OPP fixes this with a dead-simple HTTP API that any device can implement.
-
-**Design principles:**
-
-- **PDF-native** — send a PDF, get a print. No PPDs, no rasterization on the client, no driver installs.
-- **HTTP/REST** — any language, any platform. `curl` can print a document.
-- **Discovery built in** — mDNS/DNS-SD announces printers automatically. No IP addresses to hunt down.
-- **Real-time status** — Server-Sent Events stream job progress and printer state live.
-- **Zero configuration** — works out of the box. Sensible defaults, optional fine-tuning.
-
-## Quick Start
-
-### Install
+OpenPrint is an open source printing protocol. Send a PDF over HTTP, get a print. No drivers. No apps. No ink DRM. Seven API endpoints replace the entire printing stack.
 
 ```bash
 pip install openprint
 ```
 
-### Print a file
+## Print in one line
 
-```python
+```bash
+# From the CLI
+opp print document.pdf
+
+# With curl
+curl -X POST http://printer.local:631/opp/v1/jobs -F "file=@document.pdf"
+
+# With Python
 from openprint import Client
-
-client = Client()
-printers = client.discover()
-printer = printers[0]
-
-job = client.print(printer, "document.pdf")
-print(f"Job {job.id}: {job.status}")
+Client().discover()
+Client().print("document.pdf")
 ```
 
-### Or use curl
+## Use your existing printers right now
+
+You don't need a new printer. The bridge wraps every printer you already own:
 
 ```bash
-# Discover printers
-curl http://printer.local:631/opp/v1/printer
-
-# Print a PDF
-curl -X POST http://printer.local:631/opp/v1/jobs \
-  -F "file=@document.pdf" \
-  -F "copies=1" \
-  -F "color=true"
-
-# Check job status
-curl http://printer.local:631/opp/v1/jobs/abc123
-
-# Stream live status
-curl http://printer.local:631/opp/v1/jobs/abc123/events
+# Start the bridge — all your printers are now available via OPP
+opp bridge
 ```
 
-### Run a print server
+That's it. Every CUPS printer and every IPP network printer is now discoverable and printable via HTTP. No drivers on any client device. Ever.
 
-```python
-from openprint import Server
-
-server = Server(name="My Printer", port=631)
-server.run()
+```
+Phone/Laptop/IoT              Bridge (Pi, server, Docker)         Your Printers
+┌──────────┐                 ┌─────────────────────────┐        ┌─────────────┐
+│  HTTP    │   POST /jobs    │  openprint-bridge       │  IPP   │ HP LaserJet │
+│  client  │ ──────────────→ │                         │ ─────→ │ Canon Inkjet│
+│  (any)   │   PDF + JSON   │  auto-discovers printers│  CUPS  │ Brother MFC │
+└──────────┘                 │  wakes sleeping printers│        │ Epson WF    │
+      ↑                      │  retries on failure     │        └─────────────┘
+      │ mDNS discovery       │  web dashboard at :631  │
+      └──────────────────────┘─────────────────────────┘
 ```
 
-## Protocol Overview
+## Test your printer
 
-OPP is versioned at `/opp/v1/`. All payloads are JSON (except file uploads which use `multipart/form-data`).
+```bash
+opp test 192.168.1.100
+```
 
-| Endpoint | Method | Description |
+```
+==================================================
+  OpenPrint Compatibility Test
+  Target: 192.168.1.100:631
+==================================================
+
+  Network connectivity... [PASS] Reachable
+  HTTP response...        [PASS] HTTP 200
+  IPP protocol...         [PASS] HP LaserJet Pro (state: idle)
+  Supported formats:      application/pdf, image/pwg-raster
+  PDF support...          [PASS] application/pdf supported
+  Driverless printing...  [PASS] PDF-native (best)
+
+==================================================
+  [PASS] This printer works with OpenPrint!
+
+  Print to it:
+    opp print document.pdf -p http://192.168.1.100:631
+==================================================
+```
+
+## What it does that nothing else does
+
+| Problem | Before | OpenPrint |
 |---|---|---|
-| `/opp/v1/printer` | GET | Printer info and capabilities |
-| `/opp/v1/jobs` | GET | List jobs |
-| `/opp/v1/jobs` | POST | Submit a print job |
-| `/opp/v1/jobs/{id}` | GET | Job status |
-| `/opp/v1/jobs/{id}` | DELETE | Cancel job |
-| `/opp/v1/jobs/{id}/events` | GET | SSE stream for job updates |
-| `/opp/v1/status` | GET | Printer status (paper, ink, errors) |
-| `/opp/v1/status/events` | GET | SSE stream for printer status |
+| **Drivers** | 200MB download per printer per OS | None. Zero. PDF over HTTP. |
+| **"Printer offline"** | Wait and pray | Auto-wakes printer, retries with backoff |
+| **Printer changes IP** | Broken until you reconfigure | mDNS re-resolves automatically |
+| **New printer on WiFi** | Manual setup on every device | Detected in seconds, works immediately |
+| **Print from phone** | Install vendor app (HP Smart, Canon PRINT) | Any HTTP client. Browser. curl. |
+| **Print from server** | Install CUPS + drivers on every server | `curl -F "file=@report.pdf" http://bridge:631/opp/v1/jobs` |
+| **Ink DRM** | "Non-genuine cartridge detected" | Not our problem. We just send PDFs. |
+| **Status** | "Check printer" (thanks) | Real-time SSE: page 3/5 printing, cyan at 45% |
 
-See the full [protocol specification](spec/openprint-protocol-v1.md) for details.
+## Deploy in 60 seconds
 
-## CUPS Bridge — Use Your Existing Printers
-
-Don't wait for printer manufacturers. The bridge wraps every CUPS printer on your system with the OPP API:
+### Raspberry Pi (recommended)
 
 ```bash
-# Start the bridge
-openprint-bridge
-
-# Or with Python
-python -c "from openprint import Bridge; Bridge(port=631).run()"
-```
-
-That's it. Every printer configured in CUPS is now discoverable and printable via OPP. Any device on your network can print with a single HTTP call — no drivers needed on the client.
-
-```bash
-# List all bridged printers
-curl http://bridge.local:631/opp/v1/printers
-
-# Print to a specific printer
-curl -X POST http://bridge.local:631/opp/v1/jobs \
-  -F "file=@document.pdf" \
-  -F "printer=HP_LaserJet"
-
-# Check all printer statuses
-curl http://bridge.local:631/opp/v1/status
-```
-
-### How It Works
-
-```
-Phone/Laptop/Server          Raspberry Pi / Any Linux Box         Your Printers
-┌──────────┐                ┌──────────────────────────┐        ┌─────────────┐
-│ OPP      │   HTTP/REST    │  OpenPrint Bridge        │  CUPS  │ HP LaserJet │
-│ Client   │ ─────────────→ │  (openprint-bridge)      │ ─────→ │ Canon Inkjet│
-│ or curl  │   PDF + JSON   │  Auto-discovers all CUPS │  IPP   │ Brother MFC │
-└──────────┘                │  printers, serves via OPP│        └─────────────┘
-      ↑                     └──────────────────────────┘
-      │  mDNS discovery — each printer advertised individually
-      └────────────────────────────────────────────────┘
-```
-
-### Raspberry Pi Setup
-
-```bash
-# Install CUPS and OpenPrint
 sudo apt install cups
 pip install openprint
-
-# One-line install (creates systemd service, starts on boot)
 sudo bash scripts/install.sh
 ```
 
-Now every device in your house prints through one endpoint. No drivers. No apps. Just HTTP.
+Starts on boot. Every device in your house prints through one endpoint.
 
-### Live Printer Detection
-
-The bridge doesn't just scan once — it watches continuously:
-
-- **CUPS watcher** polls every 10 seconds for printers added/removed from CUPS
-- **Network scanner** uses mDNS to detect IPP/IPP-S printers appearing on WiFi in real-time
-- **Direct IPP backend** talks to IPP printers without CUPS — no CUPS config needed for network printers
-
-Plug a printer into your WiFi and it appears in seconds. Unplug it and it disappears.
-
-### TLS
+### Docker
 
 ```bash
-# Auto-generate a self-signed cert
-openprint-bridge --tls-auto
-
-# Or bring your own
-openprint-bridge --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
+cd docker
+docker compose up -d
 ```
 
-### Web Dashboard
-
-Open `http://<bridge-ip>:631` in a browser. Drag a PDF, pick a printer, print. Live status updates for all printers and jobs.
-
-### Persistent Job History
-
-All jobs are stored in SQLite at `~/.openprint/jobs.db`. Survives restarts, queryable via the API.
-
-## Architecture
-
-```
-┌──────────┐     HTTP/REST      ┌──────────────┐
-│  Client   │ ──────────────── │  OPP Server   │
-│  (app)    │   PDF + JSON     │  (printer)    │
-└──────────┘                   └──────────────┘
-      │                               │
-      │  mDNS/DNS-SD discovery        │  Renders & prints
-      └───────────────────────────────┘
-```
-
-## Project Structure
-
-```
-openprint/
-├── spec/                    # Protocol specification
-├── src/openprint/           # Reference implementation
-│   ├── server.py            # OPP server
-│   ├── client.py            # OPP client
-│   ├── discovery.py         # mDNS/DNS-SD printer discovery
-│   ├── models.py            # Data models
-│   ├── pdf.py               # PDF validation and handling
-│   ├── status.py            # Real-time status via SSE
-│   ├── auth.py              # API key authentication
-│   ├── config.py            # Configuration management
-│   ├── middleware.py         # Request logging and error handling
-│   └── errors.py            # Error types
-├── tests/                   # Test suite
-├── examples/                # Usage examples
-├── docker/                  # Container support
-├── backend.py               # Abstract print backend interface
-└── backends/                # Backend implementations
-    ├── cups.py              # CUPS/IPP bridge (real printers)
-    └── dummy.py             # Simulated printer for testing
-```
-
-## Configuration
-
-```python
-from openprint import Server
-
-server = Server(
-    name="Office Printer",
-    port=631,
-    auth_token="your-secret-token",    # Optional API key
-    max_file_size=100_000_000,          # 100MB limit
-    supported_media=["a4", "letter"],   # Paper sizes
-    color=True,                         # Color support
-    duplex=True,                        # Duplex support
-)
-```
-
-Or via environment variables:
+### Any Linux/macOS machine
 
 ```bash
-export OPP_NAME="Office Printer"
-export OPP_PORT=631
-export OPP_AUTH_TOKEN="your-secret-token"
+pip install openprint
+opp bridge
 ```
 
-## Development
+## The protocol
+
+Seven endpoints. That's the whole thing.
+
+| Endpoint | Method | What it does |
+|---|---|---|
+| `/opp/v1/printer` | GET | Printer info and capabilities |
+| `/opp/v1/printers` | GET | List all printers (bridge mode) |
+| `/opp/v1/jobs` | POST | Submit a print job (PDF upload) |
+| `/opp/v1/jobs` | GET | List jobs |
+| `/opp/v1/jobs/{id}` | GET | Job status |
+| `/opp/v1/jobs/{id}` | DELETE | Cancel job |
+| `/opp/v1/jobs/{id}/events` | GET | Real-time SSE job updates |
+| `/opp/v1/status` | GET | Printer status, supplies, errors |
+| `/opp/v1/status/events` | GET | Real-time SSE printer status |
+
+Full spec: [spec/openprint-protocol-v1.md](spec/openprint-protocol-v1.md)
+
+## CLI
+
+```bash
+opp discover              # Find printers on the network
+opp print doc.pdf         # Print to the first available printer
+opp print doc.pdf -p HP   # Print to a specific printer
+opp print doc.pdf --bw    # Grayscale
+opp print doc.pdf --duplex long-edge
+opp status                # Printer status and supply levels
+opp jobs                  # Recent print jobs
+opp test 192.168.1.100    # Test printer compatibility
+opp bridge                # Bridge all local printers to OPP
+opp server                # Run a standalone OPP server
+```
+
+## Web dashboard
+
+Open `http://<bridge-ip>:631` in any browser. Dark mode. Drag-and-drop PDF printing. Live status for all printers and jobs.
+
+## Features
+
+- **Live printer detection** — mDNS scanner + CUPS watcher detect printers joining/leaving the network in real-time
+- **Direct IPP** — talks to IPP printers without CUPS, no configuration needed
+- **Wake-on-LAN** — wakes sleeping printers before printing
+- **Retry with backoff** — handles "printer offline" gracefully instead of failing
+- **Health monitoring** — checks all printers every 30s, re-resolves mDNS for IP changes
+- **TLS** — `opp bridge --tls-auto` or bring your own certs
+- **Job persistence** — SQLite-backed history at `~/.openprint/jobs.db`
+- **Systemd service** — runs on boot, auto-restarts on failure
+
+## Report your printer
+
+**Help us build the compatibility database.** Run `opp test` on your printer and [submit a report](https://github.com/yahorse/openprint/issues/new?template=printer-report.yml):
+
+```bash
+opp test <your-printer-ip>
+```
+
+Every report helps. We want to know what works and what doesn't.
+
+## Contributing
 
 ```bash
 git clone https://github.com/yahorse/openprint.git
@@ -234,6 +183,22 @@ pip install -e ".[dev]"
 pytest
 ```
 
+90 tests. All passing. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Why this exists
+
+Printer manufacturers have had decades to make printing work. They chose instead to:
+
+- Sell ink at [$12,000 per gallon](https://www.businessinsider.com/why-printer-ink-so-expensive-2019-8)
+- Ship printers that [refuse to scan when ink is low](https://www.theverge.com/2021/8/12/22621513/hp-printers-all-in-one-printing-ink-cartridge-low)
+- Push [firmware updates that brick third-party cartridges](https://www.eff.org/deeplinks/2020/11/ink-stained-wretches-fighting-free-printer)
+- Require [monthly subscriptions to use your own printer](https://www.theverge.com/2024/9/10/24240534/hp-all-in-plan-monthly-subscription-printers-ink)
+- Build apps that [collect your data](https://foundation.mozilla.org/en/privacynotincluded/hp-deskjet-2742e-all-in-one-printer/) and show ads on your printer's screen
+
+The technology to make printing simple has existed for 15 years. A printer is a computer with a PDF renderer and a paper feed. It should be a web server that accepts file uploads. That's it.
+
+No printer company will build this because it would make their driver ecosystems, proprietary apps, ink DRM, and subscription models obsolete. Open source has to do it.
+
 ## License
 
-MIT
+MIT — do whatever you want with it.

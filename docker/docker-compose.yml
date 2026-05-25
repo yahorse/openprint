@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  openprint:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.bridge
+    ports:
+      - "631:631"
+    volumes:
+      - openprint-data:/home/openprint/.openprint
+      - /var/run/cups:/var/run/cups
+    environment:
+      - OPP_NAME=OpenPrint Bridge
+      - OPP_PORT=631
+    restart: unless-stopped
+    network_mode: host  # Required for mDNS printer discovery
+
+volumes:
+  openprint-data:

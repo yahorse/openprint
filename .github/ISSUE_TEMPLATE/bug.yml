@@ -1,0 +1,34 @@
+name: Bug Report
+description: Something isn't working
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      placeholder: "I tried to print a PDF and got an error..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+  - type: input
+    id: printer
+    attributes:
+      label: Printer model (if relevant)
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "Ubuntu 24.04, macOS 15, Raspberry Pi OS"

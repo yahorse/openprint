@@ -45,6 +45,7 @@ Homepage = "https://github.com/yahorse/openprint"
 Repository = "https://github.com/yahorse/openprint"
 
 [project.scripts]
+opp = "openprint.cli.main:main"
 openprint-server = "openprint.server:main"
 openprint-bridge = "openprint.bridge:main"
 

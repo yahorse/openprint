@@ -1,0 +1,51 @@
+name: Printer Compatibility Report
+description: Report whether your printer works with OpenPrint
+title: "[Printer] "
+labels: ["printer-report"]
+body:
+  - type: input
+    id: manufacturer
+    attributes:
+      label: Manufacturer
+      placeholder: "HP, Canon, Epson, Brother, etc."
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      placeholder: "LaserJet Pro M404n"
+    validations:
+      required: true
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Connection type
+      options:
+        - WiFi
+        - Ethernet
+        - USB (via bridge)
+    validations:
+      required: true
+  - type: dropdown
+    id: works
+    attributes:
+      label: Does it work?
+      options:
+        - "Yes — direct IPP (no CUPS needed)"
+        - "Yes — via CUPS bridge"
+        - "Partial — some features missing"
+        - "No — does not work"
+    validations:
+      required: true
+  - type: textarea
+    id: test-output
+    attributes:
+      label: Test output
+      description: "Paste the output of: opp test <printer-ip>"
+      render: shell
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: "Any issues, workarounds, or additional details"
