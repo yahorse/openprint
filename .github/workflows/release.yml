@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -11,20 +12,25 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             target: linux-amd64
-            artifact: opp
+            sep: ":"
+            strip: "--strip"
           - os: macos-13
             target: macos-intel
-            artifact: opp
+            sep: ":"
+            strip: "--strip"
           - os: macos-latest
             target: macos-arm64
-            artifact: opp
+            sep: ":"
+            strip: "--strip"
           - os: windows-latest
             target: windows-amd64
-            artifact: opp.exe
+            sep: ";"
+            strip: ""
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -40,9 +46,10 @@ jobs:
           pip install pyinstaller
 
       - name: Build standalone binary
+        shell: bash
         run: |
-          pyinstaller --onefile --name opp --strip --noconfirm \
-            --add-data "src/openprint/static:openprint/static" \
+          pyinstaller --onefile --name opp ${{ matrix.strip }} --noconfirm \
+            --add-data "src/openprint/static${{ matrix.sep }}openprint/static" \
             --hidden-import openprint.cli.main \
             --hidden-import openprint.server \
             --hidden-import openprint.bridge \
@@ -50,6 +57,12 @@ jobs:
             --hidden-import openprint.backends.cups \
             --hidden-import openprint.backends.ipp \
             --hidden-import openprint.backends.dummy \
+            --hidden-import openprint.dashboard \
+            --hidden-import openprint.resilience \
+            --hidden-import openprint.scanner \
+            --hidden-import openprint.store \
+            --hidden-import openprint.tls \
+            --hidden-import openprint.progress \
             --collect-submodules openprint \
             src/openprint/cli/__main__.py
 
@@ -57,11 +70,12 @@ jobs:
         shell: bash
         run: |
           cd dist
-          if [ "${{ matrix.target }}" != "windows-amd64" ]; then
-            mv opp opp-${{ matrix.target }}
-          else
+          if [ "${{ matrix.target }}" = "windows-amd64" ]; then
             mv opp.exe opp-${{ matrix.target }}.exe
+          else
+            mv opp opp-${{ matrix.target }}
           fi
+          ls -la
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -83,11 +97,13 @@ jobs:
       - name: List artifacts
         run: find artifacts -type f | sort
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
           generate_release_notes: true
-          files: artifacts/*
+          files: |
+            artifacts/**/*
           body: |
             ## Install
 
@@ -101,7 +117,7 @@ jobs:
             | **Windows** | `opp-windows-amd64.exe` |
 
             ```bash
-            # Linux / macOS — download and run
+            # Linux / macOS
             chmod +x opp-*
             ./opp-linux-amd64 discover
 
@@ -134,3 +150,4 @@ jobs:
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
           skip-existing: true
+        continue-on-error: true
