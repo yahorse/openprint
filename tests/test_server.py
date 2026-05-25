@@ -1,5 +1,7 @@
 from fastapi.testclient import TestClient
 
+from openprint.models import JobStatus
+from openprint.server import Server
 from tests.conftest import MINIMAL_PDF, MULTI_PAGE_PDF
 
 
@@ -88,12 +90,13 @@ def test_get_job_not_found(app: TestClient):
     assert resp.status_code == 404
 
 
-def test_cancel_job(app: TestClient):
+def test_cancel_job(app: TestClient, server: Server):
     submit = app.post(
         "/opp/v1/jobs",
         files={"file": ("test.pdf", MINIMAL_PDF, "application/pdf")},
     )
     job_id = submit.json()["id"]
+    server.jobs[job_id].status = JobStatus.QUEUED
     resp = app.delete(f"/opp/v1/jobs/{job_id}")
     assert resp.status_code == 200
     assert resp.json()["status"] == "canceled"
