@@ -13,7 +13,6 @@ from openprint.models import (
     Job,
     PrinterState,
     SupplyLevels,
-    TrayStatus,
 )
 
 logger = logging.getLogger("openprint.cups")

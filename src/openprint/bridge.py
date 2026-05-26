@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -20,7 +19,6 @@ from openprint.errors import (
     FileTooLarge,
     InvalidParameter,
     NotFound,
-    OPPError,
     PrinterUnavailable,
 )
 from openprint.middleware import ErrorHandlerMiddleware, RequestLoggingMiddleware
@@ -32,13 +30,14 @@ from openprint.models import (
     JobStatus,
     PrinterInfo,
     PrinterState,
-    PrinterStatus,
     SupplyLevels,
-    TrayStatus,
 )
 from openprint.pdf import parse_page_range, validate_pdf
 from openprint.progress import JobProgressTracker
-from openprint.resilience import PrinterHealthMonitor, RetryPrinter, check_ipp_alive, wait_for_printer
+from openprint.resilience import (
+    PrinterHealthMonitor,
+    RetryPrinter,
+)
 from openprint.scanner import CUPSWatcher, NetworkPrinterScanner
 from openprint.status import EventBus, event_stream
 from openprint.store import JobStore
@@ -49,7 +48,9 @@ logger = logging.getLogger("openprint.bridge")
 class BridgedPrinter:
     """A single printer exposed via OPP."""
 
-    def __init__(self, printer_id: str, backend: CUPSBackend | IPPBackend, source: str = "cups") -> None:
+    def __init__(
+        self, printer_id: str, backend: CUPSBackend | IPPBackend, source: str = "cups",
+    ) -> None:
         self.printer_id = printer_id
         self.backend = backend
         self.source = source
@@ -297,7 +298,7 @@ class Bridge:
         @app.post("/opp/v1/jobs", status_code=201)
         async def create_job(
             request: Request,
-            file: UploadFile = File(...),
+            file: UploadFile = File(...),  # noqa: B008
             printer: str = Form(""),
             copies: int = Form(1),
             color: bool = Form(True),
@@ -327,10 +328,10 @@ class Bridge:
 
             try:
                 duplex_mode = DuplexMode(duplex)
-            except ValueError:
+            except ValueError as err:
                 raise InvalidParameter(
                     f"Invalid duplex mode '{duplex}'. Use: none, long-edge, short-edge"
-                )
+                ) from err
 
             data = await file.read()
             if len(data) > self.config.max_file_size:
@@ -585,7 +586,9 @@ def main() -> None:
     parser.add_argument("--tls-key", help="Path to TLS private key")
     parser.add_argument("--tls-auto", action="store_true", help="Auto-generate self-signed cert")
     parser.add_argument("--no-dashboard", action="store_true", help="Disable web dashboard")
-    parser.add_argument("--no-network-scan", action="store_true", help="Disable IPP network scanning")
+    parser.add_argument(
+        "--no-network-scan", action="store_true", help="Disable IPP network scanning",
+    )
     parser.add_argument("--auth-token", help="Require this token for API access")
     args = parser.parse_args()
 

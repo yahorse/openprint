@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import struct
 from typing import Any
@@ -35,7 +34,12 @@ TAG_MIME = 0x49
 
 def _encode_attribute(tag: int, name: str, value: bytes) -> bytes:
     name_bytes = name.encode()
-    return struct.pack(">BH", tag, len(name_bytes)) + name_bytes + struct.pack(">H", len(value)) + value
+    return (
+        struct.pack(">BH", tag, len(name_bytes))
+        + name_bytes
+        + struct.pack(">H", len(value))
+        + value
+    )
 
 
 def _encode_string_attr(tag: int, name: str, value: str) -> bytes:
@@ -85,10 +89,7 @@ def _parse_ipp_response(data: bytes) -> dict[str, Any]:
     if len(data) < 8:
         return {"status": -1, "attributes": {}}
 
-    version_major = data[0]
-    version_minor = data[1]
     status = struct.unpack(">H", data[2:4])[0]
-    request_id = struct.unpack(">I", data[4:8])[0]
 
     attrs: dict[str, Any] = {}
     pos = 8
@@ -278,7 +279,7 @@ class IPPBackend(PrintBackend):
             if not isinstance(names, list):
                 names = [names]
 
-            for name, level in zip(names, levels):
+            for name, level in zip(names, levels, strict=False):
                 if not isinstance(level, int):
                     continue
                 name_lower = str(name).lower()

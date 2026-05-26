@@ -7,13 +7,12 @@ from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import JSONResponse
 from starlette.responses import StreamingResponse
 
 from openprint.auth import verify_auth
 from openprint.config import ServerConfig
 from openprint.discovery import PrinterAdvertiser
-from openprint.errors import FileTooLarge, InvalidParameter, NotFound, OPPError, PrinterUnavailable
+from openprint.errors import FileTooLarge, InvalidParameter, NotFound, PrinterUnavailable
 from openprint.middleware import ErrorHandlerMiddleware, RequestLoggingMiddleware
 from openprint.models import (
     Capabilities,
@@ -89,7 +88,7 @@ class Server:
         @app.post("/opp/v1/jobs", status_code=201)
         async def create_job(
             request: Request,
-            file: UploadFile = File(...),
+            file: UploadFile = File(...),  # noqa: B008
             copies: int = Form(1),
             color: bool = Form(True),
             duplex: str = Form("none"),
@@ -110,10 +109,10 @@ class Server:
 
             try:
                 duplex_mode = DuplexMode(duplex)
-            except ValueError:
+            except ValueError as err:
                 raise InvalidParameter(
                     f"Invalid duplex mode '{duplex}'. Use: none, long-edge, short-edge"
-                )
+                ) from err
 
             data = await file.read()
             if len(data) > self.config.max_file_size:

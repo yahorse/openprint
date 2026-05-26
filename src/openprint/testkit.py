@@ -11,9 +11,7 @@ Tests whether a printer can work with OPP by checking:
 from __future__ import annotations
 
 import asyncio
-import socket
 import struct
-import sys
 from typing import Any
 
 import httpx
@@ -48,7 +46,7 @@ async def test_printer(host: str, port: int = 631) -> dict[str, Any]:
     results: dict[str, Any] = {"host": host, "port": port, "tests": {}}
 
     print(f"\n{'='*50}")
-    print(f"  OpenPrint Compatibility Test")
+    print("  OpenPrint Compatibility Test")
     print(f"  Target: {host}:{port}")
     print(f"{'='*50}\n")
 
@@ -83,26 +81,26 @@ async def test_printer(host: str, port: int = 631) -> dict[str, Any]:
     if all_pass:
         results["compatible"] = True
         print(f"  {PASS} This printer works with OpenPrint!")
-        print(f"\n  Print to it:")
+        print("\n  Print to it:")
         print(f"    opp print document.pdf -p http://{host}:{port}")
     elif ipp_ok:
         results["compatible"] = True
         print(f"  {WARN} Partially compatible (may need CUPS bridge)")
-        print(f"\n  Use the bridge:")
-        print(f"    opp bridge")
+        print("\n  Use the bridge:")
+        print("    opp bridge")
     else:
         results["compatible"] = False
         print(f"  {FAIL} Not directly compatible")
-        print(f"\n  This printer needs CUPS as a bridge:")
-        print(f"    sudo apt install cups")
-        print(f"    opp bridge")
+        print("\n  This printer needs CUPS as a bridge:")
+        print("    sudo apt install cups")
+        print("    opp bridge")
     print(f"{'='*50}\n")
 
     return results
 
 
 async def _test_reachable(host: str, port: int) -> bool:
-    print(f"  Network connectivity...", end=" ", flush=True)
+    print("  Network connectivity...", end=" ", flush=True)
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(host, port), timeout=5.0
@@ -117,20 +115,20 @@ async def _test_reachable(host: str, port: int) -> bool:
 
 
 async def _test_http(host: str, port: int) -> bool:
-    print(f"  HTTP response...", end=" ", flush=True)
+    print("  HTTP response...", end=" ", flush=True)
     try:
         async with httpx.AsyncClient(timeout=5.0, verify=False) as client:
             resp = await client.get(f"http://{host}:{port}/")
             print(f"{PASS} HTTP {resp.status_code}")
             return True
-    except Exception as exc:
+    except Exception:
         # Many printers don't respond to GET / but still speak IPP
         print(f"{WARN} No HTTP response (may still work via IPP)")
         return False
 
 
 async def _test_ipp(host: str, port: int) -> tuple[bool, dict[str, Any]]:
-    print(f"  IPP protocol...", end=" ", flush=True)
+    print("  IPP protocol...", end=" ", flush=True)
 
     # Build a Get-Printer-Attributes request
     header = struct.pack(">HHI", 0x0200, 0x000B, 1)
@@ -173,7 +171,7 @@ async def _test_ipp(host: str, port: int) -> tuple[bool, dict[str, Any]]:
 
 
 def _check_pdf_support(attrs: dict[str, Any]) -> bool:
-    print(f"  PDF support...", end=" ", flush=True)
+    print("  PDF support...", end=" ", flush=True)
     formats = attrs.get("document-format-supported", [])
     if isinstance(formats, str):
         formats = [formats]
@@ -188,7 +186,7 @@ def _check_pdf_support(attrs: dict[str, Any]) -> bool:
 
 
 def _check_driverless(attrs: dict[str, Any]) -> bool:
-    print(f"  Driverless printing...", end=" ", flush=True)
+    print("  Driverless printing...", end=" ", flush=True)
     formats = attrs.get("document-format-supported", [])
     if isinstance(formats, str):
         formats = [formats]

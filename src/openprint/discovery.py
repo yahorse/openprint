@@ -4,8 +4,8 @@ import asyncio
 import socket
 from typing import Any
 
-from zeroconf import ServiceBrowser, ServiceInfo, ServiceStateChange, Zeroconf
-from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
+from zeroconf import ServiceInfo, ServiceStateChange, Zeroconf
+from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
 SERVICE_TYPE = "_opp._tcp.local."
 

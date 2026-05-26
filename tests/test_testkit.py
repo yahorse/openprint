@@ -1,4 +1,4 @@
-from openprint.testkit import TEST_PDF, _parse_ipp_attrs, _ipp_string_attr
+from openprint.testkit import TEST_PDF, _ipp_string_attr, _parse_ipp_attrs
 
 
 def test_test_pdf_is_valid():

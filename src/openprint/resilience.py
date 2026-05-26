@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
-import struct
 import subprocess
 from typing import Any
 

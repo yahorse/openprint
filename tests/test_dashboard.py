@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from openprint.dashboard import STATIC_DIR
 

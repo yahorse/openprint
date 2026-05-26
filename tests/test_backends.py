@@ -1,7 +1,7 @@
 import pytest
 
-from openprint.backends.dummy import DummyBackend
 from openprint.backends.cups import CUPSBackend, _parse_media_sizes
+from openprint.backends.dummy import DummyBackend
 from openprint.models import Job, PrinterState
 
 
