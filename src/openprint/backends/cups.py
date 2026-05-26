@@ -199,11 +199,14 @@ class CUPSBackend(PrintBackend):
     @staticmethod
     async def list_printers() -> list[dict[str, Any]]:
         """List all CUPS printers on this system."""
-        result = await asyncio.to_thread(
-            subprocess.run,
-            ["lpstat", "-p", "-d"],
-            capture_output=True, text=True,
-        )
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run,
+                ["lpstat", "-p", "-d"],
+                capture_output=True, text=True,
+            )
+        except FileNotFoundError:
+            return []
         if result.returncode != 0:
             return []
 
