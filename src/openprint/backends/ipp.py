@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import logging
 import struct
 from typing import Any
@@ -10,6 +11,32 @@ from openprint.backend import PrintBackend
 from openprint.models import Capabilities, Job, PrinterState, SupplyLevels
 
 logger = logging.getLogger("openprint.ipp")
+
+# Formats the backend can send natively (no conversion needed)
+_NATIVE_FORMATS = {"application/pdf", "application/octet-stream"}
+# Fallback JPEG DPI when PDF conversion is required
+_JPEG_DPI = 150
+
+
+def _pdf_to_jpeg(pdf_data: bytes, dpi: int = _JPEG_DPI) -> bytes:
+    """Render the first page of a PDF to a JPEG byte string."""
+    try:
+        import fitz  # type: ignore[import]
+    except ImportError as exc:
+        raise RuntimeError(
+            "pymupdf is required to print to printers that do not support PDF. "
+            "Install it with: pip install pymupdf"
+        ) from exc
+
+    doc = fitz.open(stream=pdf_data, filetype="pdf")
+    page = doc[0]
+    mat = fitz.Matrix(dpi / 72, dpi / 72)
+    pix = page.get_pixmap(matrix=mat)
+    from PIL import Image  # type: ignore[import]
+    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", dpi=(dpi, dpi), quality=85)
+    return buf.getvalue()
 
 # IPP operation codes
 OP_PRINT_JOB = 0x0002
@@ -61,6 +88,7 @@ def _build_ipp_request(
     attributes: list[bytes] | None = None,
     job_id: int | None = None,
     document: bytes | None = None,
+    doc_format: str = "application/octet-stream",
 ) -> bytes:
     header = struct.pack(">HHI", 0x0200, operation, request_id)
 
@@ -70,7 +98,7 @@ def _build_ipp_request(
     body += _encode_string_attr(TAG_URI, "printer-uri", printer_uri)
 
     if document is not None:
-        body += _encode_string_attr(TAG_MIME, "document-format", "application/octet-stream")
+        body += _encode_string_attr(TAG_MIME, "document-format", doc_format)
 
     if job_id is not None:
         body += _encode_int_attr(TAG_INTEGER, "job-id", job_id)
@@ -96,6 +124,7 @@ def _parse_ipp_response(data: bytes) -> dict[str, Any]:
 
     attrs: dict[str, Any] = {}
     pos = 8
+    current_name = ""
 
     while pos < len(data):
         if data[pos] in (TAG_OPERATION, TAG_JOB, 0x04):  # 0x04 = printer attrs
@@ -138,15 +167,20 @@ def _parse_ipp_response(data: bytes) -> dict[str, Any]:
         else:
             value = raw_value
 
+        # Multi-value attributes: continuation values have empty name
+        attr_name = name if name else current_name
+        if not attr_name:
+            continue
         if name:
-            if name in attrs:
-                existing = attrs[name]
-                if isinstance(existing, list):
-                    existing.append(value)
-                else:
-                    attrs[name] = [existing, value]
+            current_name = name
+        if attr_name in attrs:
+            existing = attrs[attr_name]
+            if isinstance(existing, list):
+                existing.append(value)
             else:
-                attrs[name] = value
+                attrs[attr_name] = [existing, value]
+        else:
+            attrs[attr_name] = value
 
     return {"status": status, "attributes": attrs}
 
@@ -168,11 +202,19 @@ class IPPBackend(PrintBackend):
     def __init__(self, uri: str, tls: bool = False) -> None:
         self._uri = uri
         self._tls = tls
-        scheme = "https" if tls else "http"
-        # Convert ipp:// URI to http:// for httpx
-        self._http_url = uri.replace("ipp://", f"{scheme}://").replace("ipps://", "https://")
+        # Build both HTTP and HTTPS candidate URLs; try HTTP first — many consumer
+        # printers (e.g. HP DeskJet) advertise ipps:// but their TLS stack drops
+        # large request bodies, while plain HTTP on port 631 works reliably.
+        http_url = uri.replace("ipp://", "http://").replace("ipps://", "http://")
+        https_url = uri.replace("ipp://", "https://").replace("ipps://", "https://")
+        if tls:
+            self._http_urls = [http_url, https_url]
+        else:
+            self._http_urls = [http_url]
+        self._http_url = self._http_urls[0]
         self._request_id = 1
         self._ipp_job_ids: dict[str, int] = {}
+        self._supported_formats: list[str] | None = None
 
     def _next_request_id(self) -> int:
         self._request_id += 1
@@ -181,15 +223,60 @@ class IPPBackend(PrintBackend):
     async def _send_ipp(
         self, data: bytes, content_type: str = "application/ipp"
     ) -> dict[str, Any]:
-        async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
-            resp = await client.post(
-                self._http_url,
-                content=data,
-                headers={"Content-Type": content_type},
-            )
-            return _parse_ipp_response(resp.content)
+        last_exc: Exception | None = None
+        for url in self._http_urls:
+            try:
+                async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+                    resp = await client.post(
+                        url,
+                        content=data,
+                        headers={"Content-Type": content_type},
+                    )
+                    # Remember the working URL for future requests
+                    self._http_url = url
+                    self._http_urls = [url]
+                    return _parse_ipp_response(resp.content)
+            except (httpx.ConnectError, httpx.TimeoutException) as exc:
+                last_exc = exc
+                logger.debug("IPP url %s failed (%s), trying next", url, exc)
+        raise RuntimeError(f"All IPP URLs failed: {last_exc}")
+
+    async def _get_supported_formats(self) -> list[str]:
+        """Query the printer for its supported document formats."""
+        request = _build_ipp_request(
+            OP_GET_PRINTER_ATTRIBUTES,
+            self._next_request_id(),
+            self._uri,
+        )
+        try:
+            result = await self._send_ipp(request)
+            raw = result["attributes"].get("document-format-supported", [])
+            if isinstance(raw, str):
+                return [raw]
+            return list(raw) if isinstance(raw, list) else []
+        except Exception:
+            return []
 
     async def print_job(self, job: Job, pdf_data: bytes) -> None:
+        # Detect supported formats on first use
+        if self._supported_formats is None:
+            self._supported_formats = await self._get_supported_formats()
+
+        formats = self._supported_formats
+        if formats and not (_NATIVE_FORMATS & set(formats)):
+            # Printer doesn't support PDF or octet-stream — convert
+            if "image/jpeg" in formats:
+                doc_data = _pdf_to_jpeg(pdf_data)
+                doc_format = "image/jpeg"
+                logger.info("Printer doesn't support PDF; converting to JPEG")
+            else:
+                doc_data = pdf_data
+                doc_format = formats[0]
+                logger.warning("Unknown printer format %s; sending PDF anyway", doc_format)
+        else:
+            doc_data = pdf_data
+            doc_format = "application/octet-stream"
+
         attrs: list[bytes] = []
 
         if job.copies > 1:
@@ -220,7 +307,8 @@ class IPPBackend(PrintBackend):
             self._next_request_id(),
             self._uri,
             attributes=attrs,
-            document=pdf_data,
+            document=doc_data,
+            doc_format=doc_format,
         )
 
         result = await self._send_ipp(request)
