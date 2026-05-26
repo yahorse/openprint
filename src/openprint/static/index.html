@@ -8,275 +8,774 @@
   :root {
     --bg: #0f1117;
     --surface: #1a1d27;
+    --surface2: #21263a;
     --border: #2a2d3a;
     --text: #e4e4e7;
     --muted: #71717a;
     --accent: #3b82f6;
+    --accent-dim: #1d3461;
     --green: #22c55e;
+    --green-dim: #14532d;
     --yellow: #eab308;
+    --yellow-dim: #3b2f00;
     --red: #ef4444;
+    --red-dim: #450a0a;
+    --cyan: #06b6d4;
+    --magenta: #d946ef;
+    --nav-h: 56px;
   }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     background: var(--bg);
     color: var(--text);
-    padding: 24px;
-    max-width: 1200px;
-    margin: 0 auto;
+    min-height: 100vh;
   }
-  h1 { font-size: 24px; font-weight: 600; margin-bottom: 8px; }
-  .subtitle { color: var(--muted); margin-bottom: 32px; font-size: 14px; }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-    gap: 16px;
-    margin-bottom: 32px;
-  }
-  .card {
+
+  /* ── Top navigation ── */
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    height: var(--nav-h);
     background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    gap: 16px;
   }
-  .card h2 {
-    font-size: 16px;
-    font-weight: 600;
-    margin-bottom: 12px;
+  nav .logo {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    color: var(--text);
     display: flex;
     align-items: center;
     gap: 8px;
   }
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    display: inline-block;
-  }
-  .status-dot.idle { background: var(--green); }
-  .status-dot.printing { background: var(--accent); animation: pulse 1.5s infinite; }
-  .status-dot.error { background: var(--red); }
-  .status-dot.offline { background: var(--muted); }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-  .supply-bar {
-    height: 6px;
-    border-radius: 3px;
-    background: var(--border);
-    margin: 4px 0 8px 0;
-    overflow: hidden;
-  }
-  .supply-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
-  .supply-label {
+  nav .logo svg { flex-shrink: 0; }
+  nav .spacer { flex: 1; }
+  nav .live-badge {
     display: flex;
-    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
     font-size: 12px;
     color: var(--muted);
   }
-  .caps { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  nav .live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.3s;
+  }
+  nav .live-dot.connected { background: var(--green); animation: pulse 2s infinite; }
+
+  /* ── Main layout ── */
+  main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 24px;
+  }
+  .page-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin-bottom: 20px;
+  }
+
+  /* ── Upload area ── */
+  .upload-area {
+    border: 2px dashed var(--border);
+    border-radius: 14px;
+    padding: 36px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    margin-bottom: 36px;
+    background: var(--surface);
+  }
+  .upload-area:hover, .upload-area.dragover {
+    border-color: var(--accent);
+    background: #1a2644;
+  }
+  .upload-area strong { font-size: 15px; }
+  .upload-area p { color: var(--muted); margin-top: 6px; font-size: 13px; }
+  .print-options {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  /* ── Section headers ── */
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .section-header h2 { font-size: 17px; font-weight: 600; }
+  .section-header .count {
+    font-size: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 2px 8px;
+    border-radius: 20px;
+  }
+
+  /* ── Printer grid ── */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+    margin-bottom: 40px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: #3a3d4a; }
+
+  .printer-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .printer-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .printer-meta { flex: 1; min-width: 0; }
+  .printer-name {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .printer-id {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: monospace;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .status-pill {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 3px 9px;
+    border-radius: 20px;
+    flex-shrink: 0;
+  }
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .status-pill.idle   { background: var(--green-dim);  color: #4ade80; }
+  .status-pill.printing { background: var(--accent-dim); color: #60a5fa; }
+  .status-pill.error  { background: var(--red-dim);    color: #f87171; }
+  .status-pill.offline { background: #27272a; color: var(--muted); }
+  .status-dot.idle    { background: var(--green); }
+  .status-dot.printing { background: var(--accent); animation: pulse 1.5s infinite; }
+  .status-dot.error   { background: var(--red); }
+  .status-dot.offline { background: var(--muted); }
+
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  /* ── Capability badges ── */
+  .caps { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
   .cap-tag {
     font-size: 11px;
     padding: 2px 8px;
     border-radius: 4px;
-    background: var(--border);
+    background: var(--surface2);
+    border: 1px solid var(--border);
     color: var(--muted);
   }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 14px;
+  .cap-tag.color-yes { border-color: #7c3aed44; color: #a78bfa; background: #1e103a; }
+  .cap-tag.duplex-yes { border-color: #0284c744; color: #38bdf8; background: #0c1f30; }
+
+  /* ── Ink level bars ── */
+  .ink-section { border-top: 1px solid var(--border); padding-top: 14px; }
+  .ink-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    margin-bottom: 10px;
   }
+  .ink-row { margin-bottom: 10px; }
+  .ink-row:last-child { margin-bottom: 0; }
+  .ink-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+  .ink-name {
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ink-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .ink-pct { font-size: 12px; font-weight: 500; }
+  .ink-pct.warn { color: var(--red); }
+  .ink-pct.caution { color: var(--yellow); }
+  .supply-bar {
+    height: 5px;
+    border-radius: 3px;
+    background: var(--border);
+    overflow: hidden;
+  }
+  .supply-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.6s ease;
+  }
+  .supply-fill.warn { filter: brightness(1.1); }
+  .ink-na {
+    font-size: 12px;
+    color: var(--muted);
+    font-style: italic;
+    text-align: center;
+    padding: 8px 0;
+  }
+
+  /* ── Jobs table ── */
+  .jobs-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    margin-bottom: 40px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead { background: var(--surface2); }
   th {
     text-align: left;
     color: var(--muted);
     font-weight: 500;
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border);
-    font-size: 12px;
+    padding: 10px 16px;
+    font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
   }
-  td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  td {
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #1e2133; }
+
   .badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 9px;
+    border-radius: 5px;
+    font-size: 11px;
     font-weight: 500;
+    text-transform: capitalize;
   }
-  .badge.queued { background: #1e3a5f; color: #60a5fa; }
-  .badge.processing, .badge.printing { background: #1a365d; color: #3b82f6; }
-  .badge.completed { background: #14532d; color: #4ade80; }
-  .badge.canceled { background: #3f3f46; color: #a1a1aa; }
-  .badge.error { background: #450a0a; color: #f87171; }
-  .upload-area {
-    border: 2px dashed var(--border);
-    border-radius: 12px;
-    padding: 40px;
-    text-align: center;
-    cursor: pointer;
-    transition: border-color 0.2s;
-    margin-bottom: 32px;
+  .badge.queued     { background: #1e3a5f; color: #60a5fa; }
+  .badge.processing, .badge.printing { background: var(--accent-dim); color: #3b82f6; }
+  .badge.completed  { background: var(--green-dim); color: #4ade80; }
+  .badge.canceled   { background: #27272a; color: #a1a1aa; }
+  .badge.error      { background: var(--red-dim); color: #f87171; }
+
+  .progress-mini {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
   }
-  .upload-area:hover, .upload-area.dragover { border-color: var(--accent); }
-  .upload-area p { color: var(--muted); margin-top: 8px; font-size: 14px; }
+  .progress-mini-bar {
+    width: 48px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .progress-mini-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.4s;
+  }
+
+  /* ── Controls (selects / buttons) ── */
   select, button {
-    background: var(--surface);
+    background: var(--surface2);
     border: 1px solid var(--border);
     color: var(--text);
-    padding: 6px 12px;
-    border-radius: 6px;
+    padding: 7px 12px;
+    border-radius: 8px;
     font-size: 13px;
     cursor: pointer;
+    outline: none;
+    transition: border-color 0.15s;
   }
+  select:focus, button:focus { border-color: var(--accent); }
   button.primary {
     background: var(--accent);
     border-color: var(--accent);
-    font-weight: 500;
+    font-weight: 600;
+    color: #fff;
   }
-  .print-options { display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
-  .empty { color: var(--muted); text-align: center; padding: 40px; }
+  button.primary:hover { background: #2563eb; border-color: #2563eb; }
+
+  /* ── Toast ── */
   #toast {
     position: fixed;
     bottom: 24px;
     right: 24px;
-    background: var(--green);
-    color: #fff;
-    padding: 10px 20px;
-    border-radius: 8px;
-    font-size: 14px;
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 500;
     display: none;
-    z-index: 100;
+    z-index: 200;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
   }
-  section { margin-bottom: 32px; }
-  section h2 { font-size: 18px; margin-bottom: 16px; }
+
+  /* ── Empty states ── */
+  .empty {
+    color: var(--muted);
+    text-align: center;
+    padding: 40px 24px;
+    font-size: 14px;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    main { padding: 20px 14px; }
+    .grid { grid-template-columns: 1fr; }
+    th:nth-child(2), td:nth-child(2) { display: none; }
+  }
 </style>
 </head>
 <body>
 
-<h1>OpenPrint</h1>
-<p class="subtitle">Driverless printing dashboard</p>
-
-<div id="upload" class="upload-area" onclick="fileInput.click()">
-  <strong>Drop a PDF here or click to upload</strong>
-  <p>Print to any discovered printer</p>
-  <input type="file" id="fileInput" accept=".pdf" hidden>
-  <div class="print-options" id="printOptions" style="display:none;justify-content:center;">
-    <select id="printerSelect"></select>
-    <select id="copies">
-      <option value="1">1 copy</option>
-      <option value="2">2 copies</option>
-      <option value="3">3 copies</option>
-      <option value="5">5 copies</option>
-    </select>
-    <select id="duplex">
-      <option value="none">Single-sided</option>
-      <option value="long-edge">Duplex (long)</option>
-      <option value="short-edge">Duplex (short)</option>
-    </select>
-    <button class="primary" onclick="submitPrint(event)">Print</button>
+<!-- Navigation -->
+<nav>
+  <div class="logo">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="6 9 6 2 18 2 18 9"/>
+      <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+      <rect x="6" y="14" width="12" height="8"/>
+    </svg>
+    OpenPrint
   </div>
-</div>
+  <div class="spacer"></div>
+  <div class="live-badge" id="liveBadge">
+    <span class="live-dot" id="liveDot"></span>
+    <span id="liveLabel">Connecting…</span>
+  </div>
+</nav>
 
-<section>
-  <h2>Printers</h2>
-  <div class="grid" id="printers"><div class="empty">Scanning...</div></div>
-</section>
+<!-- Main content -->
+<main>
 
-<section>
-  <h2>Recent Jobs</h2>
-  <div class="card">
+  <!-- Upload / Print -->
+  <div id="upload" class="upload-area" onclick="fileInput.click()">
+    <strong>Drop a PDF here or click to upload</strong>
+    <p>Print to any discovered printer — no drivers needed</p>
+    <input type="file" id="fileInput" accept=".pdf" hidden>
+    <div class="print-options" id="printOptions" style="display:none">
+      <select id="printerSelect"></select>
+      <select id="copies">
+        <option value="1">1 copy</option>
+        <option value="2">2 copies</option>
+        <option value="3">3 copies</option>
+        <option value="5">5 copies</option>
+      </select>
+      <select id="duplex">
+        <option value="none">Single-sided</option>
+        <option value="long-edge">Duplex (long edge)</option>
+        <option value="short-edge">Duplex (short edge)</option>
+      </select>
+      <button class="primary" onclick="submitPrint(event)">Print</button>
+    </div>
+  </div>
+
+  <!-- Printers -->
+  <div class="section-header">
+    <h2>Printers</h2>
+    <span class="count" id="printerCount">—</span>
+  </div>
+  <div class="grid" id="printers">
+    <div class="empty">Scanning for printers…</div>
+  </div>
+
+  <!-- Jobs -->
+  <div class="section-header">
+    <h2>Recent Jobs</h2>
+    <span class="count" id="jobCount">—</span>
+  </div>
+  <div class="jobs-card">
     <table>
-      <thead><tr><th>Job</th><th>Printer</th><th>Status</th><th>Pages</th><th>Time</th></tr></thead>
-      <tbody id="jobs"><tr><td colspan="5" class="empty">No jobs yet</td></tr></tbody>
+      <thead>
+        <tr>
+          <th>Job ID</th>
+          <th>Status</th>
+          <th>Pages</th>
+          <th>Copies</th>
+          <th>Submitted</th>
+        </tr>
+      </thead>
+      <tbody id="jobs">
+        <tr><td colspan="5" class="empty">No jobs yet</td></tr>
+      </tbody>
     </table>
   </div>
-</section>
+
+</main>
 
 <div id="toast"></div>
 
 <script>
 const API = '/opp/v1';
-let selectedFile = null;
+
+// ── Utilities ────────────────────────────────────────────────────────────────
+
+function esc(s) {
+  if (s == null) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+function relativeTime(isoStr) {
+  if (!isoStr) return '—';
+  const diff = Math.floor((Date.now() - new Date(isoStr)) / 1000);
+  if (diff < 5)  return 'just now';
+  if (diff < 60) return diff + 's ago';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
+}
+
+function clamp(v) { return Math.max(0, Math.min(100, v)); }
 
 async function fetchJSON(path) {
   const r = await fetch(API + path);
+  if (!r.ok) throw new Error(r.status);
   return r.json();
 }
+
+function showToast(msg, isError) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.background = isError ? 'var(--red)' : 'var(--green)';
+  t.style.color = '#fff';
+  t.style.display = 'block';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.style.display = 'none', 3200);
+}
+
+// ── Ink level rendering ───────────────────────────────────────────────────────
+
+const INK_META = {
+  black:   { label: 'Black',   color: '#d4d4d8', swatch: '#3f3f46' },
+  cyan:    { label: 'Cyan',    color: 'var(--cyan)',    swatch: '#0e7490' },
+  magenta: { label: 'Magenta', color: 'var(--magenta)', swatch: '#86198f' },
+  yellow:  { label: 'Yellow',  color: 'var(--yellow)',  swatch: '#a16207' },
+};
+
+function inkBar(key, pct) {
+  const meta = INK_META[key] || { label: key, color: '#aaa', swatch: '#555' };
+  const level = clamp(Math.round(pct));
+  const isWarn   = level < 15;
+  const isCaution = level >= 15 && level < 30;
+  const fillColor = isWarn ? 'var(--red)' : (isCaution ? 'var(--yellow)' : meta.color);
+  const pctClass  = isWarn ? 'warn' : (isCaution ? 'caution' : '');
+  return `
+    <div class="ink-row">
+      <div class="ink-label-row">
+        <span class="ink-name">
+          <span class="ink-swatch" style="background:${meta.swatch}"></span>
+          ${esc(meta.label)}
+        </span>
+        <span class="ink-pct ${pctClass}">${level}%</span>
+      </div>
+      <div class="supply-bar">
+        <div class="supply-fill ${isWarn ? 'warn' : ''}"
+             style="width:${level}%; background:${fillColor}"></div>
+      </div>
+    </div>`;
+}
+
+function buildInkSection(supplies) {
+  // supplies may be null/undefined if endpoint unavailable
+  if (!supplies || typeof supplies !== 'object') {
+    return `<div class="ink-section"><div class="ink-na">Ink levels not available</div></div>`;
+  }
+  const keys = ['black', 'cyan', 'magenta', 'yellow'];
+  const available = keys.filter(k => supplies[k] != null);
+  if (!available.length) {
+    return `<div class="ink-section"><div class="ink-na">Ink levels not reported</div></div>`;
+  }
+  return `<div class="ink-section">
+    <div class="ink-section-title">Ink levels</div>
+    ${available.map(k => inkBar(k, supplies[k])).join('')}
+  </div>`;
+}
+
+// ── Printer cards ────────────────────────────────────────────────────────────
+
+// Cache of per-printer supply data keyed by printer id
+const supplyCache = {};
+
+async function fetchSupplies(printerId) {
+  try {
+    const data = await fetchJSON(`/printers/${encodeURIComponent(printerId)}/supplies`);
+    supplyCache[printerId] = data.supplies || null;
+  } catch (_) {
+    supplyCache[printerId] = null; // 404 or network error — treat as unavailable
+  }
+}
+
+function printerCard(p, statusOverride) {
+  const state = statusOverride || p.status || 'offline';
+  const statusLabel = state.charAt(0).toUpperCase() + state.slice(1);
+  const supplies = supplyCache[p.id];
+
+  return `
+    <div class="card" id="printer-${esc(p.id)}">
+      <div class="printer-header">
+        <div class="printer-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--muted)"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="6 9 6 2 18 2 18 9"/>
+            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+            <rect x="6" y="14" width="12" height="8"/>
+          </svg>
+        </div>
+        <div class="printer-meta">
+          <div class="printer-name">${esc(p.name)}</div>
+          <div class="printer-id">${esc(p.id)}</div>
+        </div>
+        <span class="status-pill ${esc(state)}">
+          <span class="status-dot ${esc(state)}"></span>
+          ${esc(statusLabel)}
+        </span>
+      </div>
+      <div class="caps">
+        ${p.capabilities?.color
+          ? '<span class="cap-tag color-yes">Color</span>'
+          : '<span class="cap-tag">Mono</span>'}
+        ${p.capabilities?.duplex
+          ? '<span class="cap-tag duplex-yes">Duplex</span>'
+          : ''}
+        ${(p.capabilities?.media_sizes || []).map(m =>
+            `<span class="cap-tag">${esc(m.toUpperCase())}</span>`).join('')}
+        ${p.source ? `<span class="cap-tag">${esc(p.source)}</span>` : ''}
+      </div>
+      ${buildInkSection(supplies)}
+    </div>`;
+}
+
+// Live status overrides from SSE — keyed by printer_id
+const liveStatus = {};
+
+let allPrinters = [];
 
 async function loadPrinters() {
   try {
     const printers = await fetchJSON('/printers');
+    allPrinters = Array.isArray(printers) ? printers : [];
+
     const grid = document.getElementById('printers');
     const select = document.getElementById('printerSelect');
+    document.getElementById('printerCount').textContent = allPrinters.length;
 
-    if (!printers.length) {
-      grid.innerHTML = '<div class="empty">No printers found</div>';
+    if (!allPrinters.length) {
+      grid.innerHTML = '<div class="empty">No printers found. Make sure OpenPrint is running.</div>';
+      select.innerHTML = '';
       return;
     }
 
-    grid.innerHTML = printers.map(p => `
-      <div class="card">
-        <h2><span class="status-dot ${p.status}"></span> ${esc(p.name)}</h2>
-        <div class="caps">
-          ${p.capabilities.color ? '<span class="cap-tag">Color</span>' : '<span class="cap-tag">Mono</span>'}
-          ${p.capabilities.duplex ? '<span class="cap-tag">Duplex</span>' : ''}
-          ${(p.capabilities.media_sizes || []).map(m => `<span class="cap-tag">${esc(m.toUpperCase())}</span>`).join('')}
-        </div>
-      </div>
-    `).join('');
+    // Fetch supplies for each printer (parallel, failures are silent)
+    await Promise.all(allPrinters.map(p => fetchSupplies(p.id)));
 
-    select.innerHTML = printers.map(p =>
+    grid.innerHTML = allPrinters.map(p => printerCard(p, liveStatus[p.id])).join('');
+
+    select.innerHTML = allPrinters.map(p =>
       `<option value="${esc(p.id)}">${esc(p.name)}</option>`
     ).join('');
-  } catch (e) {
+  } catch (_) {
     document.getElementById('printers').innerHTML =
-      '<div class="empty">Cannot reach server</div>';
+      '<div class="empty">Cannot reach OpenPrint server.</div>';
   }
 }
+
+function updatePrinterStatus(printerId, state) {
+  liveStatus[printerId] = state;
+  const card = document.getElementById(`printer-${printerId}`);
+  if (!card) return; // card not rendered yet
+  const pill = card.querySelector('.status-pill');
+  const dot  = card.querySelector('.status-dot');
+  if (!pill || !dot) return;
+  // Remove old state classes
+  ['idle','printing','error','offline'].forEach(s => {
+    pill.classList.remove(s);
+    dot.classList.remove(s);
+  });
+  pill.classList.add(state);
+  dot.classList.add(state);
+  const label = state.charAt(0).toUpperCase() + state.slice(1);
+  pill.lastChild.textContent = label; // text node after the dot span
+}
+
+// ── Job queue ─────────────────────────────────────────────────────────────────
 
 async function loadJobs() {
   try {
     const data = await fetchJSON('/jobs?limit=20');
+    const jobs = data.jobs || [];
     const tbody = document.getElementById('jobs');
+    document.getElementById('jobCount').textContent = data.total ?? jobs.length;
 
-    if (!data.jobs.length) {
+    if (!jobs.length) {
       tbody.innerHTML = '<tr><td colspan="5" class="empty">No jobs yet</td></tr>';
       return;
     }
 
-    tbody.innerHTML = data.jobs.map(j => `
-      <tr>
-        <td style="font-family:monospace;font-size:12px">${esc(j.id)}</td>
-        <td>${esc(j.media || '-')}</td>
-        <td><span class="badge ${j.status}">${esc(j.status)}</span></td>
-        <td>${j.pages_printed}/${j.pages_total}</td>
-        <td style="color:var(--muted);font-size:12px">${new Date(j.created_at).toLocaleTimeString()}</td>
-      </tr>
-    `).join('');
-  } catch (e) {}
+    tbody.innerHTML = jobs.map(j => {
+      const pct = j.pages_total > 0
+        ? Math.round((j.pages_printed / j.pages_total) * 100)
+        : 0;
+      const showBar = ['processing','printing'].includes(j.status);
+      const pagesCell = showBar
+        ? `<div class="progress-mini">
+             <div class="progress-mini-bar">
+               <div class="progress-mini-fill" style="width:${pct}%"></div>
+             </div>
+             ${j.pages_printed}/${j.pages_total}
+           </div>`
+        : `${j.pages_printed ?? 0}/${j.pages_total ?? 0}`;
+
+      return `<tr>
+        <td style="font-family:monospace;font-size:11px;color:var(--muted)">
+          ${esc((j.id || '').slice(0, 12))}…
+        </td>
+        <td><span class="badge ${esc(j.status)}">${esc(j.status)}</span></td>
+        <td>${pagesCell}</td>
+        <td>${esc(j.copies ?? 1)}</td>
+        <td style="color:var(--muted);font-size:12px" title="${esc(j.created_at)}">
+          ${relativeTime(j.created_at)}
+        </td>
+      </tr>`;
+    }).join('');
+  } catch (_) {}
 }
 
-function esc(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
+// ── SSE live status ───────────────────────────────────────────────────────────
+
+function connectSSE() {
+  const dot   = document.getElementById('liveDot');
+  const label = document.getElementById('liveLabel');
+
+  const es = new EventSource(API + '/status/events');
+
+  es.onopen = () => {
+    dot.classList.add('connected');
+    label.textContent = 'Live';
+  };
+
+  es.onerror = () => {
+    dot.classList.remove('connected');
+    label.textContent = 'Reconnecting…';
+    // EventSource auto-reconnects; no manual retry needed
+  };
+
+  es.addEventListener('state', e => {
+    try {
+      const payload = JSON.parse(e.data);
+      // payload may be { state: 'idle' } (single printer) or
+      // { printer_id: { state, ... }, ... } (bridge/multi-printer)
+      if (payload.state && typeof payload.state === 'string') {
+        // Single-printer server — apply to first printer
+        if (allPrinters[0]) updatePrinterStatus(allPrinters[0].id, payload.state);
+      } else {
+        Object.entries(payload).forEach(([pid, info]) => {
+          if (info && info.state) updatePrinterStatus(pid, info.state);
+        });
+      }
+      // Refresh jobs on any state change
+      loadJobs();
+    } catch (_) {}
+  });
+
+  // Also handle generic 'message' events in case server uses default event type
+  es.onmessage = e => {
+    try {
+      const payload = JSON.parse(e.data);
+      if (payload.state && allPrinters[0]) {
+        updatePrinterStatus(allPrinters[0].id, payload.state);
+      }
+    } catch (_) {}
+  };
 }
 
+// ── File drag / drop / print ──────────────────────────────────────────────────
+
+let selectedFile = null;
 const upload = document.getElementById('upload');
 const fileInput = document.getElementById('fileInput');
 
-upload.addEventListener('dragover', e => { e.preventDefault(); upload.classList.add('dragover'); });
+upload.addEventListener('dragover', e => {
+  e.preventDefault();
+  upload.classList.add('dragover');
+});
 upload.addEventListener('dragleave', () => upload.classList.remove('dragover'));
 upload.addEventListener('drop', e => {
   e.preventDefault();
   upload.classList.remove('dragover');
   if (e.dataTransfer.files[0]) pickFile(e.dataTransfer.files[0]);
 });
-fileInput.addEventListener('change', () => { if (fileInput.files[0]) pickFile(fileInput.files[0]); });
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) pickFile(fileInput.files[0]);
+});
 
 function pickFile(file) {
   if (!file.name.toLowerCase().endsWith('.pdf')) {
-    toast('Please select a PDF file', true);
+    showToast('Please select a PDF file', true);
     return;
   }
   selectedFile = file;
@@ -298,32 +797,38 @@ async function submitPrint(e) {
     const r = await fetch(API + '/jobs', { method: 'POST', body: form });
     const data = await r.json();
     if (r.ok) {
-      toast('Print job submitted: ' + data.id);
+      showToast('Job submitted: ' + (data.id || '').slice(0, 8) + '…');
       selectedFile = null;
       upload.querySelector('strong').textContent = 'Drop a PDF here or click to upload';
       document.getElementById('printOptions').style.display = 'none';
       fileInput.value = '';
       loadJobs();
     } else {
-      toast(data.error?.message || 'Print failed', true);
+      showToast(data.error?.message || 'Print failed', true);
     }
-  } catch (e) {
-    toast('Network error', true);
+  } catch (_) {
+    showToast('Network error', true);
   }
 }
 
-function toast(msg, isError) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.style.background = isError ? 'var(--red)' : 'var(--green)';
-  t.style.display = 'block';
-  setTimeout(() => t.style.display = 'none', 3000);
-}
+// ── Relative time refresh ─────────────────────────────────────────────────────
+// Re-render relative timestamps every 30 s without a full reload
+setInterval(() => {
+  document.querySelectorAll('#jobs td[title]').forEach(td => {
+    td.textContent = relativeTime(td.getAttribute('title'));
+  });
+}, 30_000);
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
 
 loadPrinters();
 loadJobs();
-setInterval(loadPrinters, 15000);
-setInterval(loadJobs, 5000);
+connectSSE();
+
+// Printers: refresh every 15 s (SSE handles real-time state; this catches new discoveries)
+setInterval(loadPrinters, 15_000);
+// Jobs: refresh every 5 s (SSE triggers an extra reload on state changes)
+setInterval(loadJobs, 5_000);
 </script>
 </body>
 </html>
