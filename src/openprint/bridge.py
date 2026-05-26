@@ -4,10 +4,13 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import uvicorn
 from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import StreamingResponse
 
 from openprint.auth import verify_auth
@@ -46,6 +49,16 @@ from openprint.store import JobStore
 logger = logging.getLogger("openprint.bridge")
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+
 class BridgedPrinter:
     """A single printer exposed via OPP."""
 
@@ -63,6 +76,8 @@ class BridgedPrinter:
         self.cached_supplies: SupplyLevels | None = None
         # Webhook URLs keyed by job_id
         self.job_webhooks: dict[str, str] = {}
+        # Timestamp of last successful prefetch (for cache TTL)
+        self._prefetch_timestamp: float | None = None
 
 
 class Bridge:
@@ -99,6 +114,12 @@ class Bridge:
         self.tls_cert: str | None = kwargs.get("tls_cert")
         self.tls_key: str | None = kwargs.get("tls_key")
 
+        # Job queue size limit
+        self.config.max_queue_size: int = kwargs.get("max_queue_size", 100)
+
+        # CORS origins (default open; pass [] to disable)
+        self.config.cors_origins: list[str] = kwargs.get("cors_origins", ["*"])
+
     async def _prefetch_printer_info(self, bp: BridgedPrinter) -> None:
         """Fetch static printer info once on discovery and cache it."""
         try:
@@ -112,6 +133,7 @@ class Bridge:
                 bp.cached_name,
                 getattr(bp.backend, "_supported_formats", None),
             )
+            bp._prefetch_timestamp = asyncio.get_event_loop().time()
         except Exception as exc:
             logger.warning("Failed to prefetch info for %s: %s", bp.printer_id, exc)
 
@@ -134,6 +156,18 @@ class Bridge:
                         )
         except Exception as exc:
             logger.warning("Failed to fetch supplies for %s: %s", bp.printer_id, exc)
+
+    def _refresh_stale_caches(self) -> None:
+        """Schedule a prefetch for any printer whose cached info is older than 300 seconds."""
+        now = asyncio.get_event_loop().time()
+        for bp in self.printers.values():
+            if bp._prefetch_timestamp is None or (now - bp._prefetch_timestamp) > 300:
+                logger.debug(
+                    "Cache stale for %s (age=%s), refreshing",
+                    bp.printer_id,
+                    None if bp._prefetch_timestamp is None else f"{now - bp._prefetch_timestamp:.0f}s",
+                )
+                asyncio.create_task(self._prefetch_printer_info(bp))
 
     async def _on_cups_found(self, printer_info: dict[str, Any]) -> None:
         name = printer_info["name"]
@@ -189,6 +223,8 @@ class Bridge:
         await self.event_bus.publish(
             "printer:status", "state", {"printer": printer_id, "state": state}
         )
+        # Refresh any stale printer info caches on every health tick
+        self._refresh_stale_caches()
         # When a printer comes back online, reschedule any queued jobs
         if state in ("online", "idle") and printer_id in self.printers:
             bp = self.printers[printer_id]
@@ -296,6 +332,15 @@ class Bridge:
         if self.config.log_requests:
             app.add_middleware(RequestLoggingMiddleware)
         app.add_middleware(ErrorHandlerMiddleware)
+        app.add_middleware(SecurityHeadersMiddleware)
+
+        if self.config.cors_origins:
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=self.config.cors_origins,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
 
         if self.enable_dashboard:
             mount_dashboard(app)
@@ -411,6 +456,16 @@ class Bridge:
         ) -> dict[str, Any]:
             self._auth(request)
 
+            # Enforce global job queue size limit
+            total_queued = sum(
+                1
+                for bp in self.printers.values()
+                for j in bp.jobs.values()
+                if j.status in (JobStatus.QUEUED, JobStatus.PROCESSING)
+            )
+            if total_queued >= self.config.max_queue_size:
+                raise PrinterUnavailable("Job queue is full. Try again later.")
+
             if printer and printer in self.printers:
                 bp = self.printers[printer]
             elif self.printers:
@@ -456,8 +511,13 @@ class Bridge:
             bp.jobs[job.id] = job
             bp.job_data[job.id] = data
 
-            # Register webhook if provided
+            # Validate and register webhook if provided
             if webhook_url:
+                parsed = urlparse(webhook_url)
+                if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                    raise InvalidParameter(
+                        "webhook_url must be a valid http or https URL"
+                    )
                 bp.job_webhooks[job.id] = webhook_url
 
             if self._store:
