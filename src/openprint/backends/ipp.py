@@ -69,6 +69,9 @@ def _build_ipp_request(
     body += _encode_string_attr(TAG_NATURAL_LANG, "attributes-natural-language", "en")
     body += _encode_string_attr(TAG_URI, "printer-uri", printer_uri)
 
+    if document is not None:
+        body += _encode_string_attr(TAG_MIME, "document-format", "application/pdf")
+
     if job_id is not None:
         body += _encode_int_attr(TAG_INTEGER, "job-id", job_id)
 
@@ -211,8 +214,6 @@ class IPPBackend(PrintBackend):
         }
         ipp_media = media_map.get(job.media, job.media)
         attrs.append(_encode_string_attr(TAG_KEYWORD, "media", ipp_media))
-
-        attrs.append(_encode_string_attr(TAG_MIME, "document-format", "application/pdf"))
 
         request = _build_ipp_request(
             OP_PRINT_JOB,
