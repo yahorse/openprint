@@ -29,6 +29,7 @@ dependencies = [
     "zeroconf>=0.131",
     "python-multipart>=0.0.9",
     "pydantic>=2.6",
+    "mcp>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -48,6 +49,7 @@ Repository = "https://github.com/yahorse/openprint"
 opp = "openprint.cli.main:main"
 openprint-server = "openprint.server:main"
 openprint-bridge = "openprint.bridge:main"
+openprint-mcp = "openprint.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/openprint"]

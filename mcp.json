@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "openprint": {
+      "command": "openprint-mcp",
+      "env": {}
+    }
+  }
+}
