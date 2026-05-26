@@ -8,6 +8,7 @@ import openprint.mcp_server as mcp_mod
 from openprint.mcp_server import (
     _get_client,
     cancel_job,
+    check_all_printers,
     check_printer_compatibility,
     discover_printers,
     duplex_modes,
@@ -15,9 +16,13 @@ from openprint.mcp_server import (
     get_printer_info,
     get_printer_status,
     list_jobs,
+    manage_queue,
     media_sizes,
     print_document,
+    print_file,
     protocol_summary,
+    setup_printer,
+    troubleshoot_printer,
 )
 from openprint.testkit import TEST_PDF
 
@@ -171,3 +176,66 @@ def test_mcp_server_has_tools():
     assert "get_job_status" in tool_names
     assert "cancel_job" in tool_names
     assert "test_printer" in tool_names
+
+
+# --- Prompt (skill) tests ---
+
+
+def test_setup_printer_prompt():
+    messages = setup_printer()
+    assert len(messages) == 1
+    assert messages[0]["role"] == "user"
+    assert "discover_printers" in messages[0]["content"]
+    assert "test_printer" in messages[0]["content"]
+
+
+def test_print_file_prompt():
+    messages = print_file("/tmp/report.pdf")
+    assert len(messages) == 1
+    assert "/tmp/report.pdf" in messages[0]["content"]
+    assert "discover_printers" in messages[0]["content"]
+    assert "print_document" in messages[0]["content"]
+
+
+def test_troubleshoot_printer_prompt_no_url():
+    messages = troubleshoot_printer()
+    assert len(messages) == 1
+    assert "discover_printers" in messages[0]["content"]
+    assert "test_printer" in messages[0]["content"]
+    assert "list_jobs" in messages[0]["content"]
+
+
+def test_troubleshoot_printer_prompt_with_url():
+    messages = troubleshoot_printer("http://192.168.1.50:631")
+    assert "http://192.168.1.50:631" in messages[0]["content"]
+    assert "get_printer_status" in messages[0]["content"]
+
+
+def test_check_all_printers_prompt():
+    messages = check_all_printers()
+    assert len(messages) == 1
+    assert "discover_printers" in messages[0]["content"]
+    assert "get_printer_status" in messages[0]["content"]
+    assert "summary" in messages[0]["content"].lower()
+
+
+def test_manage_queue_prompt_no_url():
+    messages = manage_queue()
+    assert len(messages) == 1
+    assert "list_jobs" in messages[0]["content"]
+    assert "cancel_job" in messages[0]["content"]
+
+
+def test_manage_queue_prompt_with_url():
+    messages = manage_queue("http://printer.local:631")
+    assert "http://printer.local:631" in messages[0]["content"]
+
+
+def test_mcp_server_has_prompts():
+    from openprint.mcp_server import mcp
+    prompt_names = [p.name for p in mcp._prompt_manager.list_prompts()]
+    assert "setup_printer" in prompt_names
+    assert "print_file" in prompt_names
+    assert "troubleshoot_printer" in prompt_names
+    assert "check_all_printers" in prompt_names
+    assert "manage_queue" in prompt_names
