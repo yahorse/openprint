@@ -6,7 +6,7 @@ It's 2026 and printing a PDF still requires downloading a 200MB driver, installi
 
 Enough.
 
-OpenPrint is an open source printing protocol. Send a PDF over HTTP, get a print. No drivers. No apps. No ink DRM. Seven API endpoints replace the entire printing stack.
+OpenPrint is an open source printing protocol. Send a PDF over HTTP, get a print. No drivers. No apps. No ink DRM. Twelve API endpoints replace the entire printing stack.
 
 ## Install
 
@@ -28,6 +28,12 @@ Or with pip (requires Python 3.10+):
 
 ```bash
 pip install openprint
+```
+
+For PDF-to-image conversion support (used when a printer doesn't accept PDF natively):
+
+```bash
+pip install openprint[pdf]
 ```
 
 ## Print in one line
@@ -136,12 +142,15 @@ opp bridge
 
 ## The protocol
 
-Seven endpoints. That's the whole thing.
+Twelve endpoints. That's the whole thing.
 
 | Endpoint | Method | What it does |
 |---|---|---|
 | `/opp/v1/printer` | GET | Printer info and capabilities |
-| `/opp/v1/printers` | GET | List all printers (bridge mode) |
+| `/opp/v1/printers` | GET | List all discovered printers (bridge mode) |
+| `/opp/v1/printers/{id}` | GET | Single printer info (bridge mode) |
+| `/opp/v1/printers/{id}/formats` | GET | Supported document formats for a printer |
+| `/opp/v1/printers/{id}/supplies` | GET | Current ink/toner levels for a printer |
 | `/opp/v1/jobs` | POST | Submit a print job (PDF upload) |
 | `/opp/v1/jobs` | GET | List jobs |
 | `/opp/v1/jobs/{id}` | GET | Job status |
@@ -169,15 +178,70 @@ opp server                # Run a standalone OPP server
 
 ## Web dashboard
 
-Open `http://<bridge-ip>:631` in any browser. Dark mode. Drag-and-drop PDF printing. Live status for all printers and jobs.
+Open `http://<bridge-ip>:631` in any browser. Dark mode. Drag-and-drop PDF printing. Live job queue with per-page progress. Ink and toner levels for all printers at a glance. Real-time updates without refreshing.
+
+## Format Support
+
+OpenPrint automatically negotiates the best document format each printer supports. When a printer doesn't accept PDF natively, the bridge falls back through formats in order: `application/pdf` → `application/octet-stream` → `image/jpeg` → `image/pwg-raster`.
+
+JPEG and PWG-Raster fallback requires optional dependencies:
+
+```bash
+pip install openprint[pdf]   # installs pymupdf + pillow
+```
+
+Without these installed, jobs sent to printers that don't accept PDF will fail immediately rather than silently producing bad output. Run `opp test <ip>` to see which formats your printer supports before relying on fallback.
+
+## Webhooks
+
+Pass a `webhook_url` when submitting a job to get notified on completion or failure:
+
+```bash
+curl -X POST http://bridge:631/opp/v1/jobs \
+  -F "file=@report.pdf" \
+  -F "webhook_url=https://myapp.example.com/hooks/print"
+```
+
+The bridge POSTs once to your URL when the job finishes:
+
+```json
+{"job_id": "job_abc123", "status": "completed", "error": null}
+```
+
+On failure:
+
+```json
+{"job_id": "job_abc123", "status": "error", "error": "Printer offline after 3 retries"}
+```
+
+Webhooks have a 10-second timeout, fire exactly once, and are never retried. A failed webhook delivery never affects the print job.
+
+## Supply Level Monitoring
+
+The bridge tracks ink and toner levels for every printer. Supply levels are fetched on discovery and available live via `GET /opp/v1/printers/{id}/supplies`.
+
+When you submit a job, the response includes a `warnings` array if any supply is below 15%:
+
+```json
+{
+  "id": "job_abc123",
+  "status": "queued",
+  "warnings": ["cyan ink is low (8%)", "yellow ink is low (12%)"]
+}
+```
+
+Warnings are informational and never block printing. Critical levels (below 10%) are also logged to the bridge application log. Supply levels are visible in the web dashboard alongside each printer.
 
 ## Features
 
 - **Live printer detection** — mDNS scanner + CUPS watcher detect printers joining/leaving the network in real-time
 - **Direct IPP** — talks to IPP printers without CUPS, no configuration needed
+- **Format negotiation** — automatically selects the best format each printer supports, with PDF-to-image fallback
 - **Wake-on-LAN** — wakes sleeping printers before printing
 - **Retry with backoff** — handles "printer offline" gracefully instead of failing
 - **Health monitoring** — checks all printers every 30s, re-resolves mDNS for IP changes
+- **Supply monitoring** — tracks ink/toner levels, warns on low supplies at job submission
+- **Webhooks** — HTTP callbacks on job completion or failure
 - **TLS** — `opp bridge --tls-auto` or bring your own certs
 - **Job persistence** — SQLite-backed history at `~/.openprint/jobs.db`
 - **Systemd service** — runs on boot, auto-restarts on failure
