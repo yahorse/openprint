@@ -5,6 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
+import httpx
 import uvicorn
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from starlette.responses import StreamingResponse
@@ -59,6 +60,9 @@ class BridgedPrinter:
         # Cached static info fetched once on discovery
         self.cached_name: str | None = None
         self.cached_caps: Capabilities | None = None
+        self.cached_supplies: SupplyLevels | None = None
+        # Webhook URLs keyed by job_id
+        self.job_webhooks: dict[str, str] = {}
 
 
 class Bridge:
@@ -110,6 +114,26 @@ class Bridge:
             )
         except Exception as exc:
             logger.warning("Failed to prefetch info for %s: %s", bp.printer_id, exc)
+
+        # Fetch and cache supply levels; warn on critically low ink
+        try:
+            supplies = await bp.backend.get_supplies()
+            bp.cached_supplies = supplies
+            supply_data = supplies.model_dump()
+            for color, level in supply_data.items():
+                if isinstance(level, (int, float)):
+                    if level == 0:
+                        logger.warning(
+                            "Printer %s: %s ink critically low (%d%%)",
+                            bp.printer_id, color, level,
+                        )
+                    elif level < 10:
+                        logger.warning(
+                            "Printer %s: %s ink critically low (%d%%)",
+                            bp.printer_id, color, level,
+                        )
+        except Exception as exc:
+            logger.warning("Failed to fetch supplies for %s: %s", bp.printer_id, exc)
 
     async def _on_cups_found(self, printer_info: dict[str, Any]) -> None:
         name = printer_info["name"]
@@ -165,6 +189,16 @@ class Bridge:
         await self.event_bus.publish(
             "printer:status", "state", {"printer": printer_id, "state": state}
         )
+        # When a printer comes back online, reschedule any queued jobs
+        if state in ("online", "idle") and printer_id in self.printers:
+            bp = self.printers[printer_id]
+            for job in bp.jobs.values():
+                if job.status == JobStatus.QUEUED:
+                    logger.info(
+                        "Printer %s back online — rescheduling queued job %s",
+                        printer_id, job.id,
+                    )
+                    asyncio.create_task(self._process_job(bp, job))
 
     async def _advertise_printer(self, name: str) -> None:
         bp = self.printers.get(name)
@@ -279,7 +313,11 @@ class Bridge:
         return self.printers[printer_id]
 
     def _register_routes(self, app: FastAPI) -> None:
-        @app.get("/opp/v1/printers")
+        @app.get(
+            "/opp/v1/printers",
+            summary="List printers",
+            description="Returns all discovered printers with their current state and capabilities.",
+        )
         async def list_printers(request: Request) -> list[dict[str, Any]]:
             self._auth(request)
             result = []
@@ -298,7 +336,11 @@ class Bridge:
                 })
             return result
 
-        @app.get("/opp/v1/printers/{printer_id}")
+        @app.get(
+            "/opp/v1/printers/{printer_id}",
+            summary="Get printer",
+            description="Returns detailed information about a specific printer, including capabilities and current state.",
+        )
         async def get_printer(request: Request, printer_id: str) -> PrinterInfo:
             self._auth(request)
             bp = self._get_printer(printer_id)
@@ -307,7 +349,11 @@ class Bridge:
             name = bp.cached_name or await bp.backend.get_printer_name()
             return PrinterInfo(name=name, capabilities=caps, status=state)
 
-        @app.get("/opp/v1/printer")
+        @app.get(
+            "/opp/v1/printer",
+            summary="Get default printer",
+            description="Returns information about the default (first discovered) printer.",
+        )
         async def get_default_printer(request: Request) -> PrinterInfo:
             self._auth(request)
             if not self.printers:
@@ -319,7 +365,38 @@ class Bridge:
             printer_name = bp.cached_name or await bp.backend.get_printer_name()
             return PrinterInfo(name=printer_name, capabilities=caps, status=state)
 
-        @app.post("/opp/v1/jobs", status_code=201)
+        @app.get(
+            "/opp/v1/printers/{printer_id}/formats",
+            summary="Get supported document formats",
+            description="Returns the list of document formats the printer supports, such as application/pdf or image/jpeg.",
+        )
+        async def get_printer_formats(
+            request: Request, printer_id: str
+        ) -> dict[str, Any]:
+            self._auth(request)
+            bp = self._get_printer(printer_id)
+            formats = getattr(bp.backend, "_supported_formats", None) or []
+            return {"printer_id": printer_id, "formats": formats}
+
+        @app.get(
+            "/opp/v1/printers/{printer_id}/supplies",
+            summary="Get printer supply levels",
+            description="Returns live ink or toner levels for a specific printer.",
+        )
+        async def get_printer_supplies(
+            request: Request, printer_id: str
+        ) -> dict[str, Any]:
+            self._auth(request)
+            bp = self._get_printer(printer_id)
+            supplies = await bp.backend.get_supplies()
+            return {"printer_id": printer_id, "supplies": supplies.model_dump()}
+
+        @app.post(
+            "/opp/v1/jobs",
+            status_code=201,
+            summary="Create print job",
+            description="Submits a new print job with the given document and print options. Optionally provide a webhook_url to receive a callback when the job completes or fails.",
+        )
         async def create_job(
             request: Request,
             file: UploadFile = File(...),  # noqa: B008
@@ -330,6 +407,7 @@ class Bridge:
             media: str = Form("a4"),
             pages: str = Form("all"),
             priority: int = Form(50),
+            webhook_url: str = Form(""),
         ) -> dict[str, Any]:
             self._auth(request)
 
@@ -378,12 +456,17 @@ class Bridge:
             bp.jobs[job.id] = job
             bp.job_data[job.id] = data
 
+            # Register webhook if provided
+            if webhook_url:
+                bp.job_webhooks[job.id] = webhook_url
+
             if self._store:
                 self._store.save(job, bp.printer_id)
 
             asyncio.create_task(self._process_job(bp, job))
 
-            return {
+            # Check supply levels and add warnings if any are below 15%
+            response: dict[str, Any] = {
                 "id": job.id,
                 "printer": bp.printer_id,
                 "status": job.status.value,
@@ -391,8 +474,26 @@ class Bridge:
                 "pages_total": job.pages_total,
                 "copies": job.copies,
             }
+            try:
+                supplies = await bp.backend.get_supplies()
+                supply_data = supplies.model_dump()
+                low_warnings = [
+                    f"{color} ink low ({level}%)"
+                    for color, level in supply_data.items()
+                    if isinstance(level, (int, float)) and level < 15
+                ]
+                if low_warnings:
+                    response["warnings"] = low_warnings
+            except Exception:
+                pass  # Supply check failures should not block job creation
 
-        @app.get("/opp/v1/jobs")
+            return response
+
+        @app.get(
+            "/opp/v1/jobs",
+            summary="List jobs",
+            description="Returns a paginated list of print jobs, optionally filtered by printer or status.",
+        )
         async def list_jobs(
             request: Request,
             printer: str | None = None,
@@ -417,7 +518,11 @@ class Bridge:
             all_jobs.sort(key=lambda j: j.created_at, reverse=True)
             return JobList(jobs=all_jobs[:limit], total=len(all_jobs))
 
-        @app.get("/opp/v1/jobs/{job_id}")
+        @app.get(
+            "/opp/v1/jobs/{job_id}",
+            summary="Get job",
+            description="Returns the current state and metadata for a specific print job.",
+        )
         async def get_job(request: Request, job_id: str) -> Job:
             self._auth(request)
             for bp in self.printers.values():
@@ -429,7 +534,11 @@ class Bridge:
                     return job
             raise NotFound(f"Job '{job_id}' not found.")
 
-        @app.delete("/opp/v1/jobs/{job_id}")
+        @app.delete(
+            "/opp/v1/jobs/{job_id}",
+            summary="Cancel job",
+            description="Cancels a queued or processing print job.",
+        )
         async def cancel_job(request: Request, job_id: str) -> dict[str, str]:
             self._auth(request)
             for bp in self.printers.values():
@@ -450,7 +559,11 @@ class Bridge:
                     return {"id": job.id, "status": job.status.value}
             raise NotFound(f"Job '{job_id}' not found.")
 
-        @app.get("/opp/v1/jobs/{job_id}/events")
+        @app.get(
+            "/opp/v1/jobs/{job_id}/events",
+            summary="Job event stream",
+            description="Server-Sent Events stream for real-time status updates on a specific print job.",
+        )
         async def job_events(request: Request, job_id: str) -> StreamingResponse:
             self._auth(request)
             found = any(job_id in bp.jobs for bp in self.printers.values())
@@ -461,7 +574,11 @@ class Bridge:
                 media_type="text/event-stream",
             )
 
-        @app.get("/opp/v1/status")
+        @app.get(
+            "/opp/v1/status",
+            summary="Get bridge status",
+            description="Returns an aggregate status summary for all printers, including state, supply levels, and job counts.",
+        )
         async def get_status(request: Request) -> dict[str, Any]:
             self._auth(request)
             result: dict[str, Any] = {}
@@ -486,7 +603,11 @@ class Bridge:
                 }
             return result
 
-        @app.get("/opp/v1/status/events")
+        @app.get(
+            "/opp/v1/status/events",
+            summary="Status event stream",
+            description="Server-Sent Events stream for real-time printer state change notifications across all printers.",
+        )
         async def status_events(request: Request) -> StreamingResponse:
             self._auth(request)
             return StreamingResponse(
@@ -504,6 +625,21 @@ class Bridge:
             await self.event_bus.publish(channel, "error", {"error": "CUPS job failed"})
         if self._store:
             self._store.update_status(job_id, status, pages)
+
+    async def _fire_webhook(self, webhook_url: str, job: Job) -> None:
+        """POST job completion data to the registered webhook URL."""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(
+                    webhook_url,
+                    json={
+                        "job_id": job.id,
+                        "status": job.status.value,
+                        "error": job.error,
+                    },
+                )
+        except Exception as exc:
+            logger.warning("Webhook delivery failed for job %s: %s", job.id, exc)
 
     async def _process_job(self, bp: BridgedPrinter, job: Job) -> None:
         channel = f"job:{job.id}"
@@ -570,6 +706,11 @@ class Bridge:
             await self.event_bus.publish(channel, "error", {"error": str(exc)})
             logger.error("Job %s failed on %s: %s", job.id, bp.printer_id, exc)
         finally:
+            # Fire webhook if registered
+            webhook_url = bp.job_webhooks.pop(job.id, "")
+            if webhook_url:
+                asyncio.create_task(self._fire_webhook(webhook_url, job))
+
             await self.event_bus.close_channel(channel)
             await self.event_bus.publish(
                 "printer:status", "state",
