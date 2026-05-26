@@ -70,7 +70,7 @@ def _build_ipp_request(
     body += _encode_string_attr(TAG_URI, "printer-uri", printer_uri)
 
     if document is not None:
-        body += _encode_string_attr(TAG_MIME, "document-format", "application/pdf")
+        body += _encode_string_attr(TAG_MIME, "document-format", "application/octet-stream")
 
     if job_id is not None:
         body += _encode_int_attr(TAG_INTEGER, "job-id", job_id)
