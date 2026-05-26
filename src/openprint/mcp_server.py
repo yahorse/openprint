@@ -295,6 +295,122 @@ def media_sizes() -> str:
     }, indent=2)
 
 
+# ---------------------------------------------------------------------------
+# Prompts (skills) — guided multi-step workflows
+# ---------------------------------------------------------------------------
+
+
+@mcp.prompt()
+def setup_printer() -> list[dict[str, str]]:
+    """Walk through discovering and verifying a new printer."""
+    return [
+        {
+            "role": "user",
+            "content": (
+                "Help me set up a printer with OpenPrint. "
+                "First, discover printers on my network using discover_printers. "
+                "If none are found, ask me for the printer's IP address and run "
+                "test_printer against it to check compatibility. "
+                "Once we have a working printer, show me its capabilities with "
+                "get_printer_info and confirm it's ready to use. "
+                "If the printer isn't directly compatible, suggest running "
+                "'opp bridge' to bridge it through CUPS."
+            ),
+        },
+    ]
+
+
+@mcp.prompt()
+def print_file(file_path: str) -> list[dict[str, str]]:
+    """Guide through printing a file with the right settings."""
+    return [
+        {
+            "role": "user",
+            "content": (
+                f"I want to print: {file_path}\n\n"
+                "First, check if a printer is available using discover_printers. "
+                "Then get the printer's capabilities with get_printer_info so you "
+                "know what it supports (color, duplex, media sizes). "
+                "Ask me about any preferences: color vs black-and-white, "
+                "single vs double-sided, paper size, number of copies, "
+                "and page range. Use sensible defaults based on the printer's "
+                "capabilities. Then print the document with print_document "
+                "and report the job ID. Finally check the job status with "
+                "get_job_status to confirm it was accepted."
+            ),
+        },
+    ]
+
+
+@mcp.prompt()
+def troubleshoot_printer(printer_url: str = "") -> list[dict[str, str]]:
+    """Diagnose and fix printer issues."""
+    target = f" at {printer_url}" if printer_url else ""
+    return [
+        {
+            "role": "user",
+            "content": (
+                f"My printer{target} isn't working. Help me diagnose it.\n\n"
+                "Run through these steps:\n"
+                "1. If I gave a URL, check get_printer_status for the state "
+                "and any errors. If no URL, run discover_printers to find it.\n"
+                "2. If the printer is offline or unreachable, run test_printer "
+                "with its IP to check network, HTTP, and IPP connectivity.\n"
+                "3. Check supply levels — low ink/toner or paper can cause "
+                "printers to refuse jobs.\n"
+                "4. Check list_jobs for stuck jobs (status 'error' or "
+                "'processing' for too long) and offer to cancel them.\n"
+                "5. Summarize what you found and suggest fixes. Common ones: "
+                "restart the bridge, power-cycle the printer, clear the queue, "
+                "or check the network cable/wifi."
+            ),
+        },
+    ]
+
+
+@mcp.prompt()
+def check_all_printers() -> list[dict[str, str]]:
+    """Get a status overview of all printers on the network."""
+    return [
+        {
+            "role": "user",
+            "content": (
+                "Give me a status report on all my printers.\n\n"
+                "1. Run discover_printers to find all available printers.\n"
+                "2. For each printer found, call get_printer_status to get "
+                "its state and supply levels.\n"
+                "3. Also call list_jobs for each to see if anything is "
+                "queued or stuck.\n"
+                "4. Present a summary table showing each printer's name, "
+                "state (idle/printing/error/offline), ink/toner levels, "
+                "and any queued or errored jobs. Flag anything that needs "
+                "attention."
+            ),
+        },
+    ]
+
+
+@mcp.prompt()
+def manage_queue(printer_url: str = "") -> list[dict[str, str]]:
+    """Review and manage the print queue."""
+    target = f"at {printer_url} " if printer_url else ""
+    return [
+        {
+            "role": "user",
+            "content": (
+                f"Show me the print queue {target}and help me manage it.\n\n"
+                "1. Use list_jobs to get all jobs. Show them in a table "
+                "with ID, status, pages, and creation time.\n"
+                "2. Highlight any jobs that are in 'error' state or have "
+                "been 'processing' unusually long.\n"
+                "3. Ask if I want to cancel any stuck or errored jobs.\n"
+                "4. If I say yes, use cancel_job for each one and confirm "
+                "the cancellation."
+            ),
+        },
+    ]
+
+
 def main() -> None:
     """Run the OpenPrint MCP server."""
     mcp.run()
