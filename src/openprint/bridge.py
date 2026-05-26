@@ -56,6 +56,9 @@ class BridgedPrinter:
         self.source = source
         self.jobs: dict[str, Job] = {}
         self.job_data: dict[str, bytes] = {}
+        # Cached static info fetched once on discovery
+        self.cached_name: str | None = None
+        self.cached_caps: Capabilities | None = None
 
 
 class Bridge:
@@ -92,12 +95,30 @@ class Bridge:
         self.tls_cert: str | None = kwargs.get("tls_cert")
         self.tls_key: str | None = kwargs.get("tls_key")
 
+    async def _prefetch_printer_info(self, bp: BridgedPrinter) -> None:
+        """Fetch static printer info once on discovery and cache it."""
+        try:
+            bp.cached_name = await bp.backend.get_printer_name()
+            bp.cached_caps = await bp.backend.get_capabilities()
+            if isinstance(bp.backend, IPPBackend):
+                bp.backend._supported_formats = await bp.backend._get_supported_formats()
+            logger.info(
+                "Prefetched info for %s: name=%r formats=%s",
+                bp.printer_id,
+                bp.cached_name,
+                getattr(bp.backend, "_supported_formats", None),
+            )
+        except Exception as exc:
+            logger.warning("Failed to prefetch info for %s: %s", bp.printer_id, exc)
+
     async def _on_cups_found(self, printer_info: dict[str, Any]) -> None:
         name = printer_info["name"]
         if name not in self.printers:
             backend = CUPSBackend(printer_name=name)
-            self.printers[name] = BridgedPrinter(name, backend, source="cups")
+            bp = BridgedPrinter(name, backend, source="cups")
+            self.printers[name] = bp
             logger.info("Hot-added CUPS printer: %s", name)
+            asyncio.create_task(self._prefetch_printer_info(bp))
             await self.event_bus.publish(
                 "printer:status", "state", {"printer": name, "state": "idle"}
             )
@@ -119,8 +140,10 @@ class Bridge:
                 uri=printer_info["uri"],
                 tls=printer_info.get("tls", False),
             )
-            self.printers[pid] = BridgedPrinter(pid, backend, source="ipp")
+            bp = BridgedPrinter(pid, backend, source="ipp")
+            self.printers[pid] = bp
             logger.info("Hot-added IPP printer: %s (%s)", printer_info["name"], pid)
+            asyncio.create_task(self._prefetch_printer_info(bp))
             await self.event_bus.publish(
                 "printer:status", "state", {"printer": pid, "state": "idle"}
             )
@@ -148,7 +171,7 @@ class Bridge:
         if not bp:
             return
         try:
-            caps = await bp.backend.get_capabilities()
+            caps = bp.cached_caps or await bp.backend.get_capabilities()
             adv = PrinterAdvertiser(
                 name=name,
                 port=self.config.port,
@@ -169,8 +192,10 @@ class Bridge:
         for p in cups_printers:
             name = p["name"]
             backend = CUPSBackend(printer_name=name)
-            self.printers[name] = BridgedPrinter(name, backend, source="cups")
+            bp = BridgedPrinter(name, backend, source="cups")
+            self.printers[name] = bp
             logger.info("Bridged CUPS printer: %s", name)
+            asyncio.create_task(self._prefetch_printer_info(bp))
 
     def _create_app(self) -> FastAPI:
         @asynccontextmanager
@@ -261,13 +286,12 @@ class Bridge:
             for pid, bp in self.printers.items():
                 try:
                     state = await bp.backend.get_state()
-                    caps = await bp.backend.get_capabilities()
                 except Exception:
                     state = PrinterState.OFFLINE
-                    caps = Capabilities()
+                caps = bp.cached_caps or Capabilities()
                 result.append({
                     "id": pid,
-                    "name": await bp.backend.get_printer_name(),
+                    "name": bp.cached_name or pid,
                     "source": bp.source,
                     "status": state.value,
                     "capabilities": caps.model_dump(),
@@ -278,9 +302,9 @@ class Bridge:
         async def get_printer(request: Request, printer_id: str) -> PrinterInfo:
             self._auth(request)
             bp = self._get_printer(printer_id)
-            caps = await bp.backend.get_capabilities()
+            caps = bp.cached_caps or await bp.backend.get_capabilities()
             state = await bp.backend.get_state()
-            name = await bp.backend.get_printer_name()
+            name = bp.cached_name or await bp.backend.get_printer_name()
             return PrinterInfo(name=name, capabilities=caps, status=state)
 
         @app.get("/opp/v1/printer")
@@ -290,9 +314,9 @@ class Bridge:
                 raise PrinterUnavailable("No printers available.")
             name = next(iter(self.printers))
             bp = self.printers[name]
-            caps = await bp.backend.get_capabilities()
+            caps = bp.cached_caps or await bp.backend.get_capabilities()
             state = await bp.backend.get_state()
-            printer_name = await bp.backend.get_printer_name()
+            printer_name = bp.cached_name or await bp.backend.get_printer_name()
             return PrinterInfo(name=printer_name, capabilities=caps, status=state)
 
         @app.post("/opp/v1/jobs", status_code=201)
