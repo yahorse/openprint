@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from openprint.models import DuplexMode, Job, JobStatus
+from openprint.models import Job, JobStatus
 from openprint.store import JobStore
 
 
@@ -79,7 +79,7 @@ def test_list_jobs_filter_status(store: JobStore):
 
 
 def test_list_jobs_limit(store: JobStore):
-    for i in range(10):
+    for _i in range(10):
         store.save(Job(pages_total=1), "P1")
 
     jobs, total = store.list_jobs(limit=3)

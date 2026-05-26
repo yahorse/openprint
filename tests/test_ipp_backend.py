@@ -1,12 +1,11 @@
 from openprint.backends.ipp import (
-    IPPBackend,
-    _encode_string_attr,
-    _encode_int_attr,
-    _encode_bool_attr,
-    _parse_ipp_response,
     TAG_CHARSET,
-    TAG_INTEGER,
     TAG_END,
+    TAG_INTEGER,
+    IPPBackend,
+    _encode_int_attr,
+    _encode_string_attr,
+    _parse_ipp_response,
 )
 
 

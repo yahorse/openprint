@@ -1,9 +1,8 @@
 import subprocess
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
-from openprint.tls import generate_self_signed_cert, create_ssl_context
+from openprint.tls import create_ssl_context, generate_self_signed_cert
 
 
 def test_generate_cert_creates_files():

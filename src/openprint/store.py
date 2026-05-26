@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -74,7 +73,9 @@ class JobStore:
         )
         self._conn.commit()
 
-    def update_status(self, job_id: str, status: str, pages_printed: int = 0, error: str | None = None) -> None:
+    def update_status(
+        self, job_id: str, status: str, pages_printed: int = 0, error: str | None = None,
+    ) -> None:
         self._conn.execute(
             "UPDATE jobs SET status = ?, pages_printed = ?, error = ? WHERE id = ?",
             (status, pages_printed, error, job_id),

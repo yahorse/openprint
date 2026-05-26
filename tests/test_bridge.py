@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 from openprint.backends.cups import CUPSBackend
 from openprint.bridge import Bridge, BridgedPrinter
 from openprint.models import Capabilities, PrinterState, SupplyLevels
-
 from tests.conftest import MINIMAL_PDF
 
 

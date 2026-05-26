@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -6,9 +5,6 @@ import pytest
 from openprint.resilience import (
     PrinterHealthMonitor,
     RetryPrinter,
-    check_ipp_alive,
-    ping_host,
-    wake_on_lan,
 )
 
 
@@ -72,7 +68,9 @@ async def test_retry_printer_wakes_then_succeeds():
         return call_count > 1  # Fail first, then succeed
 
     with patch("openprint.resilience.check_ipp_alive", side_effect=check_alive):
-        with patch("openprint.resilience.wait_for_printer", new_callable=AsyncMock, return_value=True):
+        with patch(
+            "openprint.resilience.wait_for_printer", new_callable=AsyncMock, return_value=True,
+        ):
             await retry.print_with_retry(AsyncMock(), b"pdf data")
 
     backend.print_job.assert_called_once()

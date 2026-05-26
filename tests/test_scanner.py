@@ -1,8 +1,7 @@
-import pytest
 
 from openprint.scanner import (
-    CUPSWatcher,
     IPP_SERVICE_TYPES,
+    CUPSWatcher,
     NetworkPrinterScanner,
 )
 
