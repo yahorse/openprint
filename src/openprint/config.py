@@ -20,3 +20,5 @@ class ServerConfig(BaseModel):
     supported_media: list[str] = Field(default_factory=lambda: ["a4", "letter"])
     enable_discovery: bool = True
     log_requests: bool = True
+    max_queue_size: int = 100
+    cors_origins: list[str] = Field(default_factory=lambda: ["*"])

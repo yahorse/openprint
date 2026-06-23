@@ -115,10 +115,10 @@ class Bridge:
         self.tls_key: str | None = kwargs.get("tls_key")
 
         # Job queue size limit
-        self.config.max_queue_size: int = kwargs.get("max_queue_size", 100)
+        self.config.max_queue_size = kwargs.get("max_queue_size", 100)
 
         # CORS origins (default open; pass [] to disable)
-        self.config.cors_origins: list[str] = kwargs.get("cors_origins", ["*"])
+        self.config.cors_origins = kwargs.get("cors_origins", ["*"])
 
     async def _prefetch_printer_info(self, bp: BridgedPrinter) -> None:
         """Fetch static printer info once on discovery and cache it."""
@@ -433,7 +433,12 @@ class Bridge:
         ) -> dict[str, Any]:
             self._auth(request)
             bp = self._get_printer(printer_id)
-            supplies = await bp.backend.get_supplies()
+            try:
+                supplies = await bp.backend.get_supplies()
+            except Exception:
+                # Mirror get_status: a backend that can't report supplies should
+                # not 500 the endpoint — return zeroed levels instead.
+                supplies = SupplyLevels()
             return {"printer_id": printer_id, "supplies": supplies.model_dump()}
 
         @app.post(
