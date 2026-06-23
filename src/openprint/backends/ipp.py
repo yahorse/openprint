@@ -14,8 +14,9 @@ logger = logging.getLogger("openprint.ipp")
 
 # Formats the backend can send natively (no conversion needed)
 _NATIVE_FORMATS = {"application/pdf", "application/octet-stream"}
-# Fallback JPEG DPI when PDF conversion is required
-_JPEG_DPI = 150
+# Fallback JPEG DPI when PDF conversion is required. 300 DPI keeps shipping-label
+# barcodes crisp enough for carriers to scan; 150 was too low for reliable reads.
+_JPEG_DPI = 300
 
 
 def _pdf_to_jpeg(pdf_data: bytes, page_index: int = 0, dpi: int = _JPEG_DPI) -> bytes:
@@ -35,7 +36,7 @@ def _pdf_to_jpeg(pdf_data: bytes, page_index: int = 0, dpi: int = _JPEG_DPI) -> 
     from PIL import Image  # type: ignore[import]
     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
     buf = io.BytesIO()
-    img.save(buf, "JPEG", dpi=(dpi, dpi), quality=85)
+    img.save(buf, "JPEG", dpi=(dpi, dpi), quality=92)
     return buf.getvalue()
 
 
@@ -61,7 +62,7 @@ def _pdf_to_jpeg_pages(
         pix = page.get_pixmap(matrix=mat)
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         buf = io.BytesIO()
-        img.save(buf, "JPEG", dpi=(dpi, dpi), quality=85)
+        img.save(buf, "JPEG", dpi=(dpi, dpi), quality=92)
         results.append(buf.getvalue())
     return results
 
@@ -532,7 +533,12 @@ class IPPBackend(PrintBackend):
             logger.info("Sent PDF to IPP printer %s, job-id: %s", self._uri, ipp_job_id)
             return
 
-        if "application/octet-stream" in format_set:
+        # Only treat octet-stream as a native passthrough when the printer has no
+        # raster format we can target. Many printers (e.g. HP DeskJet) advertise
+        # octet-stream but have no PDF interpreter — sending raw PDF there prints
+        # garbage. If image/jpeg or image/pwg-raster is available, rasterise instead.
+        _has_raster = "image/jpeg" in format_set or "image/pwg-raster" in format_set
+        if "application/octet-stream" in format_set and not _has_raster:
             # octet-stream fallback — single Print-Job request
             attrs = self._build_job_attrs(job)
             request = _build_ipp_request(

@@ -71,7 +71,7 @@ class PrinterScanner:
             zc.zeroconf, SERVICE_TYPE, handlers=[self._on_change]
         )
         await asyncio.sleep(timeout)
-        browser.cancel()
+        await browser.async_cancel()
         await zc.async_close()
         return self._found
 
