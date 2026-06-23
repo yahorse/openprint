@@ -9,6 +9,8 @@ from typing import Any
 from zeroconf import ServiceBrowser, ServiceInfo, ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncZeroconf
 
+from openprint.backends.cups import CUPSBackend
+
 logger = logging.getLogger("openprint.scanner")
 
 IPP_SERVICE_TYPES = ["_ipp._tcp.local.", "_ipps._tcp.local."]
@@ -157,8 +159,6 @@ class CUPSWatcher:
                 pass
 
     async def _poll_loop(self) -> None:
-        from openprint.backends.cups import CUPSBackend
-
         while True:
             try:
                 printers = await CUPSBackend.list_printers()

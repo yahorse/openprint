@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import struct
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -20,7 +20,6 @@ from openprint.backends.ipp import (
     _parse_ipp_response,
 )
 from openprint.models import Job
-
 
 # ---------------------------------------------------------------------------
 # Helper: build a minimal valid IPP response
@@ -76,7 +75,14 @@ def test_ipp_backend_init():
 
 def test_ipp_backend_tls():
     backend = IPPBackend(uri="ipps://printer.local:631/ipp/print", tls=True)
-    assert backend._http_url == "https://printer.local:631/ipp/print"
+    # With tls=True the backend keeps both candidate URLs and tries plain HTTP
+    # first — many consumer printers (e.g. HP DeskJet) advertise ipps:// but
+    # their TLS stack drops large request bodies, while plain HTTP works.
+    assert backend._http_urls == [
+        "http://printer.local:631/ipp/print",
+        "https://printer.local:631/ipp/print",
+    ]
+    assert backend._http_url == "http://printer.local:631/ipp/print"
 
 
 def test_encode_string_attr():

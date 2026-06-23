@@ -4,7 +4,6 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import pytest_asyncio
 from fastapi.testclient import TestClient
 
 from openprint.backends.cups import CUPSBackend
@@ -12,7 +11,6 @@ from openprint.backends.ipp import IPPBackend
 from openprint.bridge import Bridge, BridgedPrinter
 from openprint.models import Capabilities, Job, JobStatus, PrinterState, SupplyLevels
 from tests.conftest import MINIMAL_PDF
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -435,6 +433,10 @@ async def test_on_health_change_online_retries_queued_jobs():
     bp = BridgedPrinter("HP_LaserJet", backend)
     b.printers = {"HP_LaserJet": bp}
 
+    # Mark the cache fresh so _refresh_stale_caches() doesn't schedule an
+    # incidental prefetch task — we only want to count the job-reschedule task.
+    bp._prefetch_timestamp = asyncio.get_running_loop().time()
+
     queued_job = Job(pages_total=1, status=JobStatus.QUEUED)
     bp.jobs[queued_job.id] = queued_job
     bp.job_data[queued_job.id] = MINIMAL_PDF
@@ -465,6 +467,10 @@ async def test_on_health_change_online_does_not_retry_processing_jobs():
     backend = _make_cups_backend("HP_LaserJet")
     bp = BridgedPrinter("HP_LaserJet", backend)
     b.printers = {"HP_LaserJet": bp}
+
+    # Mark the cache fresh so _refresh_stale_caches() doesn't schedule a
+    # prefetch task — a processing job must not trigger any task here.
+    bp._prefetch_timestamp = asyncio.get_running_loop().time()
 
     processing_job = Job(pages_total=1, status=JobStatus.PROCESSING)
     bp.jobs[processing_job.id] = processing_job

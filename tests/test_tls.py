@@ -1,4 +1,3 @@
-import subprocess
 import tempfile
 from pathlib import Path
 
@@ -10,11 +9,7 @@ def test_generate_cert_creates_files():
         cert = Path(tmp) / "test.crt"
         key = Path(tmp) / "test.key"
 
-        # Only test if openssl is available
-        result = subprocess.run(["which", "openssl"], capture_output=True)
-        if result.returncode != 0:
-            return
-
+        # Generation is pure-Python (cryptography lib) — works on all platforms.
         c, k = generate_self_signed_cert(cert, key, hostname="test.local")
         assert c.exists()
         assert k.exists()

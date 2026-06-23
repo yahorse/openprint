@@ -30,6 +30,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "pydantic>=2.6",
     "mcp>=1.0",
+    "cryptography>=42.0",
 ]
 
 [project.optional-dependencies]

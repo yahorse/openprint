@@ -1,5 +1,8 @@
+import shutil
 import subprocess
 import sys
+
+import pytest
 
 
 def test_cli_help():
@@ -23,8 +26,13 @@ def test_cli_no_args():
 
 
 def test_opp_entrypoint():
+    # Resolve the console script via shutil.which so the .exe is found on
+    # Windows (bare "opp" isn't located by CreateProcess without PATHEXT).
+    opp = shutil.which("opp")
+    if opp is None:
+        pytest.skip("opp console script not installed on PATH")
     result = subprocess.run(
-        ["opp", "--help"],
+        [opp, "--help"],
         capture_output=True, text=True,
     )
     assert result.returncode == 0
