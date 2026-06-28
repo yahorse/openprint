@@ -68,6 +68,7 @@ class Job(BaseModel):
     color: bool = True
     duplex: DuplexMode = DuplexMode.NONE
     media: str = "a4"
+    pages: str = "all"
     priority: int = 50
     error: str | None = None
     file_size: int = 0

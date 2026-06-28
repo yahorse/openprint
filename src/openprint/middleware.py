@@ -32,12 +32,26 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
+        from fastapi.responses import JSONResponse
+
         try:
             return await call_next(request)
         except OPPError as exc:
-            from fastapi.responses import JSONResponse
-
             return JSONResponse(
                 status_code=exc.status_code,
                 content=exc.to_dict(),
+            )
+        except Exception:
+            # Never leak a stack trace or a bare ASGI 500; return a clean JSON body.
+            logger.exception(
+                "Unhandled error processing %s %s", request.method, request.url.path
+            )
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": {
+                        "code": "internal_error",
+                        "message": "An unexpected internal error occurred.",
+                    }
+                },
             )
