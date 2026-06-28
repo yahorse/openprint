@@ -435,6 +435,44 @@ class IPPBackend(PrintBackend):
 
         return attrs
 
+    async def _send_pages_separate_jobs(
+        self,
+        job: Job,
+        page_data_list: list[bytes],
+        doc_format: str,
+    ) -> dict[str, Any]:
+        """Send each page as its own single-document Print-Job.
+
+        The most compatible way to print multiple rendered pages: many consumer
+        printers (e.g. HP DeskJet) reject the multi-document Create-Job /
+        Send-Document flow with IPP 0x0509 (multiple-document-jobs-not-supported).
+        One Print-Job per page sidesteps that entirely.
+
+        Returns the result of the final Print-Job call.
+        """
+        attrs = self._build_job_attrs(job)
+        last_result: dict[str, Any] = {}
+        for i, page_data in enumerate(page_data_list):
+            request = _build_ipp_request(
+                OP_PRINT_JOB,
+                self._next_request_id(),
+                self._uri,
+                attributes=attrs,
+                document=page_data,
+                doc_format=doc_format,
+            )
+            last_result = await self._send_ipp(request)
+            if last_result["status"] > 0x00FF:
+                raise RuntimeError(
+                    f"IPP Print-Job (page {i}) failed: "
+                    f"status 0x{last_result['status']:04x}"
+                )
+            # Track the most recent printer job-id for status/cancel.
+            ipp_job_id = last_result["attributes"].get("job-id")
+            if ipp_job_id:
+                self._ipp_job_ids[job.id] = ipp_job_id
+        return last_result
+
     async def _send_multipage_image_job(
         self,
         job: Job,
@@ -443,7 +481,8 @@ class IPPBackend(PrintBackend):
     ) -> dict[str, Any]:
         """Send a multi-document IPP job using Create-Job + Send-Document.
 
-        Returns the result of the final Send-Document call.
+        Falls back to one Print-Job per page when the printer doesn't support
+        multiple-document jobs (IPP 0x0509). Returns the result of the final call.
         """
         attrs = self._build_job_attrs(job)
 
@@ -455,6 +494,13 @@ class IPPBackend(PrintBackend):
             attributes=attrs,
         )
         create_result = await self._send_ipp(create_request)
+        # 0x0509 = multiple-document-jobs-not-supported: fall back to one
+        # Print-Job per page (done before any document is sent, so no duplication).
+        if create_result["status"] == 0x0509:
+            logger.info(
+                "Printer rejects multi-document jobs; sending pages separately"
+            )
+            return await self._send_pages_separate_jobs(job, page_data_list, doc_format)
         if create_result["status"] > 0x00FF:
             raise RuntimeError(
                 f"IPP Create-Job failed: status 0x{create_result['status']:04x}"
@@ -586,9 +632,11 @@ class IPPBackend(PrintBackend):
                     "Sent JPEG to IPP printer %s, job-id: %s", self._uri, ipp_job_id
                 )
             else:
-                # Multi-page — use Create-Job + Send-Document
+                # Multi-page — send one Print-Job per page. Consumer printers
+                # commonly reject multi-document jobs (IPP 0x0509), so this is the
+                # most compatible path and avoids partial-print duplication.
                 jpeg_pages = _pdf_to_jpeg_pages(pdf_data, page_indices)
-                result = await self._send_multipage_image_job(job, jpeg_pages, "image/jpeg")
+                result = await self._send_pages_separate_jobs(job, jpeg_pages, "image/jpeg")
                 ipp_job_id = result["attributes"].get("job-id")
                 if ipp_job_id:
                     self._ipp_job_ids[job.id] = ipp_job_id

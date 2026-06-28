@@ -31,6 +31,20 @@ def _reset_client():
     mcp_mod._client = None
 
 
+def _temp_config():
+    """An OPPConfig backed by a throwaway file so tests don't touch the real one."""
+    from openprint.integrations import OPPConfig
+
+    fd, path = tempfile.mkstemp(suffix=".json")
+    import os
+
+    os.close(fd)
+    os.unlink(path)
+    from pathlib import Path
+
+    return OPPConfig(path=Path(path))
+
+
 def test_discover_printers_found():
     _reset_client()
     fake_printers = [
@@ -56,13 +70,30 @@ def test_print_document_file_not_found():
     assert "not found" in result["error"].lower()
 
 
-def test_print_document_not_pdf():
-    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+def test_print_document_unsupported_type():
+    with tempfile.NamedTemporaryFile(suffix=".xyz", delete=False) as f:
         f.write(b"hello")
         f.flush()
-        result = json.loads(print_document(f.name))
+        result = json.loads(print_document(f.name, printer_url="http://localhost:631"))
     assert "error" in result
-    assert "PDF" in result["error"]
+    assert "convert" in result["error"].lower()
+
+
+def test_print_document_converts_text():
+    # A .txt file is now auto-converted to PDF and routed to the printer.
+    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+        f.write(b"hello from a text file")
+        f.flush()
+        txt_path = f.name
+
+    fake_response = {"job_id": "job_txt", "status": "queued"}
+    with (
+        patch.object(mcp_mod, "_config", _temp_config()),
+        patch.object(mcp_mod.Client, "print", return_value=fake_response),
+    ):
+        result = json.loads(print_document(txt_path, printer_url="http://localhost:631"))
+    assert result.get("job_id") == "job_txt"
+    assert result.get("converted_from", "").endswith(".txt")
 
 
 def test_print_document_success():
@@ -72,7 +103,10 @@ def test_print_document_success():
         pdf_path = f.name
 
     fake_response = {"job_id": "job_abc123", "status": "queued"}
-    with patch.object(mcp_mod.Client, "print", return_value=fake_response):
+    with (
+        patch.object(mcp_mod, "_config", _temp_config()),
+        patch.object(mcp_mod.Client, "print", return_value=fake_response),
+    ):
         result = json.loads(print_document(pdf_path, printer_url="http://localhost:631"))
     assert result["job_id"] == "job_abc123"
 

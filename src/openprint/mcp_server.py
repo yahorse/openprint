@@ -4,22 +4,28 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from openprint import integrations
 from openprint.client import Client
-from openprint.models import DuplexMode
+from openprint.integrations import OPPConfig
 from openprint.testkit import test_printer as run_printer_test
 
 mcp = FastMCP(
     "openprint",
     instructions=(
-        "OpenPrint MCP server for driverless printing over HTTP. "
-        "Use discover_printers to find printers on the network, then print_document "
-        "to send PDFs. Use get_printer_status or get_job_status to monitor state."
+        "OpenPrint MCP server for driverless printing. print_document accepts PDFs "
+        "as well as HTML, text, and images (auto-converted to PDF) and prints to "
+        "either OPP servers or raw IPP printers — it rasterises for printers with no "
+        "PDF interpreter (e.g. HP DeskJet). It discovers printers via mDNS and falls "
+        "back to a saved default (set_default_printer). For a printer reachable only "
+        "over Wi-Fi Direct, use connect_wifi_direct first, then print, then "
+        "restore_wifi. Use get_printer_status or get_job_status to monitor state."
     ),
 )
+
+_config = OPPConfig()
 
 _client: Client | None = None
 
@@ -46,11 +52,24 @@ def discover_printers(timeout: float = 3.0) -> str:
     client = _get_client()
     printers = client.discover(timeout=timeout)
     if not printers:
+        saved = _config.default_printer
         return json.dumps({
             "printers": [],
-            "message": "No printers found. Ensure a printer or bridge is running.",
+            "saved_default": saved,
+            "message": (
+                "No printers found via mDNS. "
+                + (
+                    f"A default printer is saved ({saved}); print_document will use it."
+                    if saved
+                    else "No default saved either — set one with set_default_printer, "
+                    "or pass printer_url to print_document."
+                )
+            ),
         })
-    return json.dumps({"printers": printers, "count": len(printers)}, indent=2)
+    return json.dumps(
+        {"printers": printers, "count": len(printers), "saved_default": _config.default_printer},
+        indent=2,
+    )
 
 
 @mcp.tool()
@@ -65,43 +84,48 @@ def print_document(
     priority: int = 50,
     auth_token: str | None = None,
 ) -> str:
-    """Print a PDF document to an OpenPrint printer.
+    """Print a document to a printer — handles everything end to end.
+
+    Accepts PDF, HTML (.html/.htm), text (.txt/.md/.csv/.log), and images
+    (.png/.jpg/...); non-PDFs are rendered to PDF automatically. Picks the
+    target by: explicit printer_url, then mDNS discovery, then the saved default
+    printer (see set_default_printer). Raw IPP printers (ipp://... or a bare
+    host/IP) are driven directly and rasterised when they lack a PDF interpreter
+    (e.g. HP DeskJet); OPP servers/bridges (http://...) use the OPP protocol.
+    On success the chosen printer is remembered as the default.
 
     Args:
-        file_path: Path to the PDF file to print.
-        printer_url: Printer URL (e.g. http://192.168.1.100:631).
-            If omitted, uses last discovered printer.
+        file_path: Path to the file to print (PDF/HTML/text/image).
+        printer_url: Printer target. Accepts "http://host:631" (OPP),
+            "ipp://host:631/ipp/print" (raw IPP), or a bare "host" / "host:port"
+            (treated as raw IPP). If omitted, discovery then saved default.
         copies: Number of copies (default 1).
         color: Print in color (default True). Set False for black-and-white.
         duplex: Duplex mode: "none", "long-edge", or "short-edge" (default "none").
         media: Paper size: "a4", "letter", etc. (default "a4").
-        pages: Page range: "all", "1-3", "1,3,5" (default "all").
-        priority: Print priority 1-100 (default 50).
-        auth_token: Bearer token if the printer requires authentication.
+        pages: Page range: "all", "1-3", "1,3,5" (default "all"). OPP targets only.
+        priority: Print priority 1-100 (default 50). OPP targets only.
+        auth_token: Bearer token if an OPP printer requires authentication.
 
     Returns:
-        JSON with job ID and status.
+        JSON with job id, transport ("ipp"/"opp"), chosen printer, and status.
     """
-    path = Path(file_path)
-    if not path.exists():
-        return json.dumps({"error": f"File not found: {file_path}"})
-    if not path.suffix.lower() == ".pdf":
-        return json.dumps({"error": f"Only PDF files are supported, got: {path.suffix}"})
-
-    client = _get_client(printer_url=printer_url, auth_token=auth_token)
     try:
-        result = client.print(
-            file_path=file_path,
+        result = integrations.print_file(
+            file_path,
+            printer_url=printer_url,
             copies=copies,
             color=color,
-            duplex=DuplexMode(duplex),
+            duplex=duplex,
             media=media,
             pages=pages,
             priority=priority,
+            auth_token=auth_token,
+            config=_config,
         )
         return json.dumps(result, indent=2, default=str)
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": str(exc), "file_path": file_path})
 
 
 @mcp.tool()
@@ -244,6 +268,89 @@ def check_printer_compatibility(host: str, port: int = 631) -> str:
         return json.dumps(results, indent=2, default=str)
     except Exception as exc:
         return json.dumps({"error": str(exc), "host": host, "port": port})
+
+
+@mcp.tool()
+def set_default_printer(printer_url: str) -> str:
+    """Save a default printer used when discovery finds nothing.
+
+    Args:
+        printer_url: "http://host:631" (OPP), "ipp://host:631/ipp/print" (raw IPP),
+            or a bare "host"/"host:port" (treated as raw IPP).
+
+    Returns:
+        JSON confirming the saved default.
+    """
+    target = integrations._normalize_target(printer_url)
+    _config.default_printer = target
+    return json.dumps({"saved": True, "default_printer": target}, indent=2)
+
+
+@mcp.tool()
+def get_default_printer() -> str:
+    """Get the currently saved default printer, if any."""
+    return json.dumps({"default_printer": _config.default_printer}, indent=2)
+
+
+@mcp.tool()
+def connect_wifi_direct(ssid: str, password: str | None = None) -> str:
+    """Connect this PC to a printer's Wi-Fi Direct network (Windows only).
+
+    Many consumer printers (e.g. HP DeskJet) are reachable only over their own
+    Wi-Fi Direct SoftAP. This adds a saved WLAN profile and connects, remembering
+    the password so future calls need no password. NOTE: connecting drops your
+    normal internet/Wi-Fi; the previously-connected SSID is returned as
+    "previous_ssid" so you can restore_wifi afterwards.
+
+    Args:
+        ssid: The Wi-Fi Direct SSID, e.g. "DIRECT-52-HP DeskJet 2900 series".
+        password: WPA2 passphrase. Optional if previously remembered.
+
+    Returns:
+        JSON with connection result and previous_ssid for later restore.
+    """
+    try:
+        return json.dumps(
+            integrations.connect_wifi_direct(ssid, password, config=_config), indent=2
+        )
+    except Exception as exc:
+        return json.dumps({"error": str(exc), "ssid": ssid})
+
+
+@mcp.tool()
+def restore_wifi(ssid: str) -> str:
+    """Reconnect to a normal Wi-Fi network after Wi-Fi Direct printing (Windows only).
+
+    Args:
+        ssid: The SSID to reconnect to (typically connect_wifi_direct's previous_ssid).
+
+    Returns:
+        JSON with the restore result.
+    """
+    try:
+        return json.dumps(integrations.restore_wifi(ssid), indent=2)
+    except Exception as exc:
+        return json.dumps({"error": str(exc), "ssid": ssid})
+
+
+@mcp.tool()
+def ensure_bridge(url: str = "http://127.0.0.1:631") -> str:
+    """Ensure an OPP bridge is running locally (best effort).
+
+    Starts `opp bridge` if one isn't already answering. Bridging relies on CUPS,
+    so on Windows this typically reports no bridged printers — prefer a direct
+    IPP printer URL there.
+
+    Args:
+        url: Where to look for / expose the bridge (default http://127.0.0.1:631).
+
+    Returns:
+        JSON describing whether a bridge is running.
+    """
+    try:
+        return json.dumps(integrations.ensure_bridge(url), indent=2)
+    except Exception as exc:
+        return json.dumps({"error": str(exc), "url": url})
 
 
 @mcp.resource("openprint://protocol")
