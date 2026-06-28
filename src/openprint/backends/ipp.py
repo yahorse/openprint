@@ -40,6 +40,21 @@ def _pdf_to_jpeg(pdf_data: bytes, page_index: int = 0, dpi: int = _JPEG_DPI) -> 
     return buf.getvalue()
 
 
+def _pdf_page_count(pdf_data: bytes) -> int:
+    """Best-effort total page count: PyMuPDF if available, else a header scan."""
+    try:
+        import fitz  # type: ignore[import]
+
+        return len(fitz.open(stream=pdf_data, filetype="pdf"))
+    except Exception:
+        try:
+            from openprint.pdf import validate_pdf
+
+            return validate_pdf(pdf_data)
+        except Exception:
+            return 1
+
+
 def _pdf_to_jpeg_pages(
     pdf_data: bytes, page_indices: list[int], dpi: int = _JPEG_DPI
 ) -> list[bytes]:
@@ -538,17 +553,23 @@ class IPPBackend(PrintBackend):
         formats = self._supported_formats
         format_set = set(formats) if formats else set()
 
-        # Determine which page indices to render
-        if job.pages_total and job.pages_total > 0:
-            page_indices = list(range(job.pages_total))
-        else:
-            # Discover page count from the PDF itself (if fitz is available)
+        # Determine which page indices to render. Honour the requested page
+        # range (job.pages, e.g. "5-7") against the PDF's *real* page count —
+        # not job.pages_total, which is only the count of selected pages, so
+        # rendering range(pages_total) would print the wrong (first N) pages.
+        total_pages = _pdf_page_count(pdf_data)
+        if job.pages and job.pages != "all":
             try:
-                import fitz  # type: ignore[import]
-                doc = fitz.open(stream=pdf_data, filetype="pdf")
-                page_indices = list(range(len(doc)))
+                from openprint.pdf import parse_page_range
+
+                # parse_page_range returns 1-based page numbers; render is 0-based.
+                page_indices = [p - 1 for p in parse_page_range(job.pages, total_pages)]
             except Exception:
-                page_indices = [0]
+                page_indices = list(range(total_pages))
+        else:
+            page_indices = list(range(total_pages))
+        if not page_indices:
+            page_indices = [0]
 
         # ------------------------------------------------------------------ #
         # Format fallback chain:                                              #

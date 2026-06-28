@@ -244,14 +244,41 @@ async def test_multipage_jpeg_uses_separate_print_jobs():
     fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 50
 
     with patch("openprint.backends.ipp._pdf_to_jpeg_pages", return_value=[fake_jpeg, fake_jpeg]):
-        job = Job(pages_total=2)
-        from tests.conftest import MINIMAL_PDF
-        await backend.print_job(job, MINIMAL_PDF)
+        # A genuinely multi-page PDF so the backend takes the multi-page path.
+        job = Job()
+        from tests.conftest import MULTI_PAGE_PDF
+        await backend.print_job(job, MULTI_PAGE_PDF)
 
-    # One Print-Job per page, no multi-document Create-Job / Send-Document.
+    # One Print-Job per rendered page, no multi-document Create-Job / Send-Document.
     assert ops_seen.count(OP_PRINT_JOB) == 2
     assert OP_CREATE_JOB not in ops_seen
     assert OP_SEND_DOCUMENT not in ops_seen
+
+
+@pytest.mark.asyncio
+async def test_page_range_renders_requested_pages():
+    """job.pages='2-3' must render PDF pages 2 and 3 (0-based 1,2), not the first two."""
+    backend = IPPBackend(uri="ipp://printer.local:631/ipp/print")
+    backend._supported_formats = ["image/jpeg"]
+
+    async def fake_send_ipp(data: bytes, content_type: str = "application/ipp"):
+        return {"status": 0x0000, "attributes": {"job-id": 7}}
+
+    backend._send_ipp = fake_send_ipp
+
+    seen_indices = []
+
+    def fake_pages(pdf_data, page_indices, dpi=150):
+        seen_indices.extend(page_indices)
+        return [b"\xff\xd8\xff\xe0" + b"\x00" * 50 for _ in page_indices]
+
+    with patch("openprint.backends.ipp._pdf_to_jpeg_pages", side_effect=fake_pages):
+        from tests.conftest import MULTI_PAGE_PDF  # 3 pages
+        job = Job(pages="2-3", pages_total=2)
+        await backend.print_job(job, MULTI_PAGE_PDF)
+
+    # 0-based indices for pages 2 and 3.
+    assert seen_indices == [1, 2]
 
 
 @pytest.mark.asyncio

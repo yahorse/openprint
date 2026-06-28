@@ -129,6 +129,7 @@ class Server:
                 color=color,
                 duplex=duplex_mode,
                 media=media,
+                pages=pages,
                 priority=priority,
                 file_size=len(data),
             )

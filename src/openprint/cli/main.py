@@ -21,13 +21,17 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command")
 
     # opp print
-    p_print = sub.add_parser("print", help="Print a PDF file")
-    p_print.add_argument("file", help="PDF file to print")
-    p_print.add_argument("-p", "--printer", help="Printer name or URL")
+    p_print = sub.add_parser("print", help="Print a file (PDF/HTML/text/image)")
+    p_print.add_argument("file", help="File to print (PDF, HTML, text, or image)")
+    p_print.add_argument(
+        "-p", "--printer",
+        help="Printer name, URL (http/ipp), or host/IP. Omit to discover or use the saved default.",
+    )
     p_print.add_argument("-n", "--copies", type=int, default=1)
     p_print.add_argument("--bw", action="store_true", help="Print in grayscale")
     p_print.add_argument("--duplex", choices=["none", "long-edge", "short-edge"], default="none")
     p_print.add_argument("--media", default="a4", help="Paper size (a4, letter, legal)")
+    p_print.add_argument("--pages", default="all", help="Page range: all, 1-3, 1,3,5")
 
     # opp discover
     sub.add_parser("discover", help="Find printers on the network")
@@ -73,50 +77,68 @@ def main() -> None:
         parser.print_help()
 
 
+def _looks_like_target(value: str) -> bool:
+    """True if *value* is a URL or host/IP rather than a discoverable printer name."""
+    if value.startswith(("http://", "https://", "ipp://", "ipps://")):
+        return True
+    # IPs and hostnames have a dot or an explicit port; printer names usually
+    # have spaces and neither. "printer.local" / "192.168.1.5" / "host:631" -> target.
+    return " " not in value and ("." in value or ":" in value)
+
+
+def _resolve_printer_arg(printer: str | None) -> str | None:
+    """Map a --printer value to a target URL for the integrations layer.
+
+    URLs and host/IPs pass through untouched. A bare printer *name* is looked up
+    via mDNS discovery and resolved to its http URL (preserving older behaviour).
+    Returns None when nothing was given, letting print_file discover or fall back
+    to the saved default.
+    """
+    if not printer:
+        return None
+    if _looks_like_target(printer):
+        return printer
+    # Treat as a discoverable printer name.
+    client = Client()
+    printers = client.discover()
+    match = [p for p in printers if p["name"] == printer]
+    if not match:
+        print(f"Printer '{printer}' not found. Run: opp discover")
+        sys.exit(1)
+    return f"http://{match[0]['host']}:{match[0]['port']}"
+
+
 def cmd_print(args: Any) -> None:
+    from openprint import integrations
+
     path = Path(args.file)
     if not path.exists():
         print(f"File not found: {path}")
         sys.exit(1)
-    if not path.suffix.lower() == ".pdf":
-        print(f"Not a PDF: {path}")
-        sys.exit(1)
 
-    if args.printer:
-        if args.printer.startswith("http"):
-            client = Client(base_url=args.printer)
-        else:
-            client = Client()
-            printers = client.discover()
-            match = [p for p in printers if p["name"] == args.printer]
-            if not match:
-                print(f"Printer '{args.printer}' not found. Run: opp discover")
-                sys.exit(1)
-            client.base_url = f"http://{match[0]['host']}:{match[0]['port']}"
-    else:
-        client = Client()
-        print("Discovering printers...")
-        printers = client.discover()
-        if not printers:
-            print("No printers found. Is the bridge running?")
-            print("  Start it:  opp bridge")
-            sys.exit(1)
-        p = printers[0]
-        print(f"Using: {p['name']} ({p['host']}:{p['port']})")
+    target = _resolve_printer_arg(args.printer)
+    if target is None and not args.printer:
+        print("No printer given — discovering / using saved default...")
 
     print(f"Printing {path.name}...")
     try:
-        job = client.print(
+        job = integrations.print_file(
             path,
+            printer_url=target,
             copies=args.copies,
             color=not args.bw,
             duplex=args.duplex,
             media=args.media,
+            pages=args.pages,
         )
-        print(f"Done. Job {job['id']} — {job['status']}")
     except Exception as exc:
         print(f"Print failed: {exc}")
         sys.exit(1)
+
+    where = job.get("printer", "printer")
+    job_id = job.get("id") or job.get("job_id", "?")
+    status = job.get("status", "submitted")
+    print(f"Done. Job {job_id} — {status}  ({where})")
 
 
 def cmd_discover() -> None:
