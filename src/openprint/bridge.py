@@ -70,6 +70,8 @@ class BridgedPrinter:
         self.source = source
         self.jobs: dict[str, Job] = {}
         self.job_data: dict[str, bytes] = {}
+        # Running job tasks keyed by job id, so a cancel can actually stop them.
+        self.tasks: dict[str, asyncio.Task[None]] = {}
         # Cached static info fetched once on discovery
         self.cached_name: str | None = None
         self.cached_caps: Capabilities | None = None
@@ -99,6 +101,10 @@ class Bridge:
         self.event_bus = EventBus()
         self._advertisers: list[PrinterAdvertiser] = []
         self._app: FastAPI | None = None
+        # Strong references to fire-and-forget background tasks (prefetch,
+        # webhooks, …). The loop only weakly references a bare create_task(),
+        # so without this they can be garbage-collected before completing.
+        self._bg_tasks: set[asyncio.Task[Any]] = set()
 
         self._store: JobStore | None = None
         self._progress: JobProgressTracker | None = None
@@ -119,6 +125,19 @@ class Bridge:
 
         # CORS origins (default open; pass [] to disable)
         self.config.cors_origins = kwargs.get("cors_origins", ["*"])
+
+    def _spawn(self, coro: Any) -> asyncio.Task[Any]:
+        """Schedule a fire-and-forget coroutine, retaining a strong reference."""
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+        return task
+
+    def _spawn_job(self, bp: BridgedPrinter, job: Job) -> None:
+        """Start processing a job, keeping a cancellable reference in bp.tasks."""
+        task = asyncio.create_task(self._process_job(bp, job))
+        bp.tasks[job.id] = task
+        task.add_done_callback(lambda t, jid=job.id: bp.tasks.pop(jid, None))
 
     async def _prefetch_printer_info(self, bp: BridgedPrinter) -> None:
         """Fetch static printer info once on discovery and cache it."""
@@ -167,7 +186,7 @@ class Bridge:
                     bp.printer_id,
                     None if bp._prefetch_timestamp is None else f"{now - bp._prefetch_timestamp:.0f}s",
                 )
-                asyncio.create_task(self._prefetch_printer_info(bp))
+                self._spawn(self._prefetch_printer_info(bp))
 
     async def _on_cups_found(self, printer_info: dict[str, Any]) -> None:
         name = printer_info["name"]
@@ -176,7 +195,7 @@ class Bridge:
             bp = BridgedPrinter(name, backend, source="cups")
             self.printers[name] = bp
             logger.info("Hot-added CUPS printer: %s", name)
-            asyncio.create_task(self._prefetch_printer_info(bp))
+            self._spawn(self._prefetch_printer_info(bp))
             await self.event_bus.publish(
                 "printer:status", "state", {"printer": name, "state": "idle"}
             )
@@ -201,7 +220,7 @@ class Bridge:
             bp = BridgedPrinter(pid, backend, source="ipp")
             self.printers[pid] = bp
             logger.info("Hot-added IPP printer: %s (%s)", printer_info["name"], pid)
-            asyncio.create_task(self._prefetch_printer_info(bp))
+            self._spawn(self._prefetch_printer_info(bp))
             await self.event_bus.publish(
                 "printer:status", "state", {"printer": pid, "state": "idle"}
             )
@@ -234,7 +253,7 @@ class Bridge:
                         "Printer %s back online — rescheduling queued job %s",
                         printer_id, job.id,
                     )
-                    asyncio.create_task(self._process_job(bp, job))
+                    self._spawn_job(bp, job)
 
     async def _advertise_printer(self, name: str) -> None:
         bp = self.printers.get(name)
@@ -265,7 +284,7 @@ class Bridge:
             bp = BridgedPrinter(name, backend, source="cups")
             self.printers[name] = bp
             logger.info("Bridged CUPS printer: %s", name)
-            asyncio.create_task(self._prefetch_printer_info(bp))
+            self._spawn(self._prefetch_printer_info(bp))
 
     def _create_app(self) -> FastAPI:
         @asynccontextmanager
@@ -529,7 +548,7 @@ class Bridge:
             if self._store:
                 self._store.save(job, bp.printer_id)
 
-            asyncio.create_task(self._process_job(bp, job))
+            self._spawn_job(bp, job)
 
             # Check supply levels and add warnings if any are below 15%
             response: dict[str, Any] = {
@@ -615,6 +634,11 @@ class Bridge:
                             f"Cannot cancel job in '{job.status.value}' state."
                         )
                     job.status = JobStatus.CANCELED
+                    # Stop the local processing task (so it can't flip the job
+                    # back to COMPLETED) and tell the device to cancel too.
+                    task = bp.tasks.get(job_id)
+                    if task is not None and not task.done():
+                        task.cancel()
                     await bp.backend.cancel_job(job)
                     await self.event_bus.publish(
                         f"job:{job_id}", "status", {"status": "canceled"}
@@ -749,6 +773,10 @@ class Bridge:
                     )
                     return  # Progress tracker will handle completion
 
+            # A cancel may have landed while the backend call was in flight;
+            # don't resurrect the job as COMPLETED.
+            if job.status == JobStatus.CANCELED:
+                return
             job.status = JobStatus.COMPLETED
             job.pages_printed = job.pages_total
             if self._store:
@@ -775,7 +803,7 @@ class Bridge:
             # Fire webhook if registered
             webhook_url = bp.job_webhooks.pop(job.id, "")
             if webhook_url:
-                asyncio.create_task(self._fire_webhook(webhook_url, job))
+                self._spawn(self._fire_webhook(webhook_url, job))
 
             await self.event_bus.close_channel(channel)
             await self.event_bus.publish(

@@ -27,6 +27,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - HTTP-first IPP strategy for printers with broken TLS stacks
 
 ### Fixed
+- Cancelling a print job now actually stops it: the in-flight task is cancelled
+  and the processing loop no longer overwrites a `canceled` job back to
+  `completed` (server and bridge)
+- Background tasks (job processing, printer-info prefetch, webhooks) keep a
+  strong reference so the event loop can't garbage-collect them mid-flight
 - CUPS print jobs crashed reading a non-existent `Job.pages` field — `pages` is
   now a first-class `Job` field carried end to end
 - Page ranges now render the **requested** pages; previously a range like `5-7`
