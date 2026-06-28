@@ -40,6 +40,16 @@ class Server:
         self.printer_state = PrinterState.IDLE
         self._advertiser: PrinterAdvertiser | None = None
         self._app: FastAPI | None = None
+        # Strong references to running job tasks. The event loop only holds a
+        # weak reference to a bare create_task(), so without this the task can
+        # be garbage-collected mid-flight. Keyed by job id so cancel can reach it.
+        self._job_tasks: dict[str, asyncio.Task[None]] = {}
+
+    def _spawn_job(self, job: Job) -> None:
+        """Start processing a job, keeping a cancellable strong reference."""
+        task = asyncio.create_task(self._process_job(job))
+        self._job_tasks[job.id] = task
+        task.add_done_callback(lambda t, jid=job.id: self._job_tasks.pop(jid, None))
 
     def _create_app(self) -> FastAPI:
         @asynccontextmanager
@@ -135,7 +145,7 @@ class Server:
             )
             self.jobs[job.id] = job
 
-            asyncio.create_task(self._process_job(job))
+            self._spawn_job(job)
 
             return {
                 "id": job.id,
@@ -176,6 +186,11 @@ class Server:
                     f"Cannot cancel job in '{job.status.value}' state."
                 )
             job.status = JobStatus.CANCELED
+            # Actually stop the in-flight task; _process_job turns the resulting
+            # CancelledError into a terminal CANCELED state.
+            task = self._job_tasks.get(job_id)
+            if task is not None and not task.done():
+                task.cancel()
             await self.event_bus.publish(
                 f"job:{job_id}", "status", {"status": "canceled"}
             )
@@ -231,6 +246,10 @@ class Server:
 
             job.status = JobStatus.PRINTING
             for page in range(1, job.pages_total + 1):
+                # Honour a cancellation that flipped the status cooperatively,
+                # even if task.cancel() didn't interrupt this exact await.
+                if job.status == JobStatus.CANCELED:
+                    return
                 await asyncio.sleep(0.5)
                 job.pages_printed = page
                 await self.event_bus.publish(
@@ -239,6 +258,8 @@ class Server:
                     {"pages_printed": page, "pages_total": job.pages_total},
                 )
 
+            if job.status == JobStatus.CANCELED:
+                return
             job.status = JobStatus.COMPLETED
             await self.event_bus.publish(
                 channel,

@@ -559,3 +559,58 @@ def test_list_printers_uses_cached_name_not_extra_ipp_calls(ipp_bridge_app, ipp_
     assert printers[0]["name"] == "My IPP Printer"
     # get_printer_name should NOT have been called again since we had a cached value
     bp.backend.get_printer_name.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Job cancellation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_bridge_job_not_resurrected_after_cancel():
+    """A cancel that lands during the backend call must not flip to COMPLETED."""
+    from openprint.backends.dummy import DummyBackend
+
+    b = _make_bridge()
+    backend = DummyBackend("Dummy")
+
+    async def cancel_midway(job, data):
+        # Simulate a DELETE /jobs/{id} arriving while printing is in flight.
+        job.status = JobStatus.CANCELED
+
+    backend.print_job = cancel_midway
+    bp = BridgedPrinter("Dummy", backend, source="ipp")
+    b.printers = {"Dummy": bp}
+
+    job = Job(pages_total=3, status=JobStatus.QUEUED)
+    bp.jobs[job.id] = job
+    bp.job_data[job.id] = MINIMAL_PDF
+
+    await b._process_job(bp, job)
+    assert job.status == JobStatus.CANCELED
+
+
+@pytest.mark.asyncio
+async def test_bridge_cancel_stops_in_flight_task():
+    """task.cancel() on a running job leaves it CANCELED and tracked in bp.tasks."""
+    from openprint.backends.dummy import DummyBackend
+
+    b = _make_bridge()
+    backend = DummyBackend("Dummy", delay_per_page=0.2)
+    bp = BridgedPrinter("Dummy", backend, source="ipp")
+    b.printers = {"Dummy": bp}
+
+    job = Job(pages_total=20, status=JobStatus.QUEUED)
+    bp.jobs[job.id] = job
+    bp.job_data[job.id] = MINIMAL_PDF
+
+    b._spawn_job(bp, job)
+    task = bp.tasks[job.id]
+    await asyncio.sleep(0.3)  # let one page print
+    job.status = JobStatus.CANCELED
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+    assert job.status == JobStatus.CANCELED
+    assert job.pages_printed < 20
+    # The done-callback removes the finished task from the tracking map.
+    assert job.id not in bp.tasks

@@ -1,8 +1,52 @@
+import asyncio
+
+import pytest
 from fastapi.testclient import TestClient
 
-from openprint.models import JobStatus
+from openprint.models import Job, JobStatus
 from openprint.server import Server
 from tests.conftest import MINIMAL_PDF, MULTI_PAGE_PDF
+
+
+@pytest.mark.asyncio
+async def test_process_job_honors_cooperative_cancel():
+    # A cancel that lands mid-run (here, after the first page) stops the loop
+    # before it can mark the job COMPLETED.
+    server = Server()
+    job = Job(pages_total=5, status=JobStatus.QUEUED)
+    server.jobs[job.id] = job
+
+    orig_publish = server.event_bus.publish
+
+    async def flip_on_progress(channel, event, data):
+        if event == "progress":
+            job.status = JobStatus.CANCELED
+        await orig_publish(channel, event, data)
+
+    server.event_bus.publish = flip_on_progress
+
+    await server._process_job(job)
+    assert job.status == JobStatus.CANCELED
+    assert job.pages_printed < 5
+
+
+@pytest.mark.asyncio
+async def test_cancel_stops_in_flight_job():
+    # Cancelling a running job leaves it CANCELED, not COMPLETED, and it stops
+    # before printing every page.
+    server = Server()
+    job = Job(pages_total=20, status=JobStatus.QUEUED)
+    server.jobs[job.id] = job
+    server._spawn_job(job)
+    task = server._job_tasks[job.id]
+
+    await asyncio.sleep(0.6)  # let it print roughly one page
+    job.status = JobStatus.CANCELED
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+    assert job.status == JobStatus.CANCELED
+    assert job.pages_printed < 20
 
 
 def test_get_printer(app: TestClient):
