@@ -218,12 +218,17 @@ async def test_format_fallback_empty_formats_sends_octet_stream():
 
 
 # ---------------------------------------------------------------------------
-# Multi-page job uses Create-Job + Send-Document
+# Multi-page job sends one Print-Job per page
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_multipage_jpeg_uses_create_job_and_send_document():
-    """Multi-page JPEG jobs must use Create-Job + Send-Document, not Print-Job."""
+async def test_multipage_jpeg_uses_separate_print_jobs():
+    """Multi-page JPEG jobs send one Print-Job per page.
+
+    Many consumer printers (e.g. HP DeskJet) reject the multi-document
+    Create-Job / Send-Document flow (IPP 0x0509), so the most compatible path
+    is one single-document Print-Job per rendered page.
+    """
     backend = IPPBackend(uri="ipp://printer.local:631/ipp/print")
     backend._supported_formats = ["image/jpeg"]
 
@@ -232,8 +237,6 @@ async def test_multipage_jpeg_uses_create_job_and_send_document():
     async def fake_send_ipp(data: bytes, content_type: str = "application/ipp"):
         op = struct.unpack(">H", data[2:4])[0]
         ops_seen.append(op)
-        if op == OP_CREATE_JOB:
-            return {"status": 0x0000, "attributes": {"job-id": 55}}
         return {"status": 0x0000, "attributes": {"job-id": 55}}
 
     backend._send_ipp = fake_send_ipp
@@ -245,9 +248,10 @@ async def test_multipage_jpeg_uses_create_job_and_send_document():
         from tests.conftest import MINIMAL_PDF
         await backend.print_job(job, MINIMAL_PDF)
 
-    assert OP_CREATE_JOB in ops_seen
-    assert OP_SEND_DOCUMENT in ops_seen
-    assert OP_PRINT_JOB not in ops_seen
+    # One Print-Job per page, no multi-document Create-Job / Send-Document.
+    assert ops_seen.count(OP_PRINT_JOB) == 2
+    assert OP_CREATE_JOB not in ops_seen
+    assert OP_SEND_DOCUMENT not in ops_seen
 
 
 @pytest.mark.asyncio
